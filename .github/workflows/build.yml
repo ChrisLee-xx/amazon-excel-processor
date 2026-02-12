@@ -3,7 +3,7 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'  # 推送 v1.0.0 这样的 tag 时触发
+      - 'v*'
 
 jobs:
   build:
@@ -27,17 +27,19 @@ jobs:
           python-version: '3.11'
 
       - name: Install Poetry
-        run: pip install poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
 
       - name: Install dependencies
-        run: |
-          cd amazon-excel-processor
-          poetry install
+        working-directory: amazon-excel-processor
+        run: poetry install
 
       - name: Build executable
-        run: |
-          cd amazon-excel-processor
-          poetry run python build.py
+        working-directory: amazon-excel-processor
+        run: poetry run python build.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
