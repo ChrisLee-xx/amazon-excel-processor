@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Excel test files
+*.xlsm
+*.xlsx
+~$*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

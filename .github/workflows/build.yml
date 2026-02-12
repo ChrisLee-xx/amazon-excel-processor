@@ -1,0 +1,73 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 推送 v1.0.0 这样的 tag 时触发
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: amazon-excel-processor-mac
+            binary: dist/amazon-excel-processor
+          - os: windows-latest
+            artifact: amazon-excel-processor-win
+            binary: dist/amazon-excel-processor.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: |
+          cd amazon-excel-processor
+          poetry install
+
+      - name: Build executable
+        run: |
+          cd amazon-excel-processor
+          poetry run python build.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: amazon-excel-processor/${{ matrix.binary }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Mac artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: amazon-excel-processor-mac
+          path: mac
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: amazon-excel-processor-win
+          path: win
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mac/amazon-excel-processor
+            win/amazon-excel-processor.exe
+          generate_release_notes: true
