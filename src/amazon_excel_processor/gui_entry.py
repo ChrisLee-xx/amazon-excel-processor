@@ -2,6 +2,7 @@
 
 import sys
 import os
+import re
 import traceback
 from pathlib import Path
 
@@ -27,10 +28,11 @@ def main():
         print("  或在下方粘贴文件路径：")
         print()
         input_file = input("文件路径: ").strip().strip('"').strip("'")
-        # macOS 终端粘贴路径时可能带转义符（如 \[ \] ），Windows 不处理
-        import platform
-        if platform.system() != "Windows":
-            input_file = input_file.replace("\\", "")
+        # 清理 shell 转义符：macOS zsh 粘贴路径时会把特殊字符转义
+        # 如 file\[1\].xlsm → 实际文件名是 file[1].xlsm
+        # 只移除"反斜杠+非路径字符"的组合，保留 Windows 路径分隔符 \
+        # \[ \] \( \) \  \! \# \$ \& \' \~ \{ \} 等都是 shell 转义
+        input_file = re.sub(r'\\(?=[^/\\:\w])', '', input_file)
         if not input_file:
             print("未输入文件路径")
             pause_exit(1)
