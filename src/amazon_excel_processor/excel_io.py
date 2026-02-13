@@ -21,6 +21,7 @@ OPTIONAL_COLUMNS = [
     "Size Map",
     "Length",
     "Weight",
+    "Search Terms",
 ]
 
 HEADER_ROW = 2

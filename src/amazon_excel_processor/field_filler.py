@@ -146,6 +146,21 @@ def fill_weight(
         ws.cell(row=row, column=col_idx).value = WEIGHT_SEQUENCE[i]
 
 
+def clean_search_terms(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+) -> None:
+    """将 Search Terms 列中的下划线替换为空格。"""
+    if "Search Terms" not in col_map:
+        return
+    col_idx = col_map["Search Terms"]
+    for row in rows:
+        value = ws.cell(row=row, column=col_idx).value
+        if value is not None and isinstance(value, str) and "_" in value:
+            ws.cell(row=row, column=col_idx).value = value.replace("_", " ")
+
+
 def fill_group(
     ws: Worksheet,
     rows: list[int],
@@ -159,3 +174,4 @@ def fill_group(
     fill_size_map(ws, rows, col_map)
     fill_length(ws, rows, col_map, ratio_type)
     fill_weight(ws, rows, col_map)
+    clean_search_terms(ws, rows, col_map)
