@@ -27,8 +27,10 @@ def main():
         print("  或在下方粘贴文件路径：")
         print()
         input_file = input("文件路径: ").strip().strip('"').strip("'")
-        # 清理路径中的反斜杠转义（如 \[ \] ），常见于终端粘贴
-        input_file = input_file.replace("\\", "")
+        # macOS 终端粘贴路径时可能带转义符（如 \[ \] ），Windows 不处理
+        import platform
+        if platform.system() != "Windows":
+            input_file = input_file.replace("\\", "")
         if not input_file:
             print("未输入文件路径")
             pause_exit(1)
