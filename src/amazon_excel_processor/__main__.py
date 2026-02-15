@@ -37,23 +37,23 @@ def main():
         sys.exit(1)
 
     try:
-        log_print(f"📂 读取文件: {input_path} ...")
+        log_print(f">> 读取文件: {input_path} ...")
         wb, ws, template_name = load_workbook(input_path)
-        log_print("✅ 文件加载完成")
+        log_print(">> 文件加载完成")
 
         col_map = locate_columns(ws)
         product_name_col = col_map["Product Name"]
-        log_print(f"✅ 列定位完成: {', '.join(col_map.keys())}")
+        log_print(f">> 列定位完成: {', '.join(col_map.keys())}")
 
         groups = group_rows(ws)
         if not groups:
-            log_print("⚠️ 没有可处理的数据")
+            log_print("[!] 没有可处理的数据")
             output_path = save_workbook(ws, input_path, template_name, args.output)
             log_print(f"输出文件: {output_path}")
             return
 
         total_rows = len(groups) * 11
-        log_print(f"📊 共 {len(groups)} 个产品组, {total_rows} 行数据")
+        log_print(f">> 共 {len(groups)} 个产品组, {total_rows} 行数据")
         log_print("")
 
         for idx, rows in enumerate(groups, 1):
@@ -64,12 +64,12 @@ def main():
             fill_group(ws, rows, col_map, ratio_type)
 
         log_print("")
-        log_print("💾 保存文件...")
+        log_print(">> 保存文件...")
         output_path = save_workbook(ws, input_path, template_name, args.output)
 
         log_print("")
         log_print("=" * 50)
-        log_print("  ✅ 处理完成")
+        log_print("  [OK] 处理完成")
         log_print("=" * 50)
         log_print(f"  产品组数: {len(groups)}")
         log_print(f"  总行数:   {total_rows}")
