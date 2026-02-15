@@ -1,6 +1,7 @@
 """Excel 文件读写模块"""
 
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -127,6 +128,46 @@ def group_rows(ws: Worksheet) -> list[list[int]]:
     return groups
 
 
+def _can_write(path: Path) -> bool:
+    """检测文件是否可写入（未被其他进程锁定）。
+
+    对于只读权限的文件，先尝试删除再重建（跨平台安全）。
+    对于被其他进程锁定的文件（如 Windows 上 Excel 打开），返回 False。
+    """
+    if not path.exists():
+        return True
+
+    # 尝试删除旧文件（copyfile 会重建）
+    try:
+        os.remove(str(path))
+        return True
+    except PermissionError:
+        # Windows: 文件被其他进程锁定，无法删除
+        return False
+    except OSError:
+        return False
+
+
+def _resolve_output_path(input_path: Path, output_path: Optional[Path]) -> Path:
+    """确定输出文件路径，若目标被占用则自动加序号。"""
+    if output_path is None:
+        base = input_path.parent / f"{input_path.stem}_processed{input_path.suffix}"
+    else:
+        base = output_path
+
+    if _can_write(base):
+        return base
+
+    # 被占用，自动加序号
+    for i in range(2, 100):
+        candidate = base.parent / f"{base.stem}_{i}{base.suffix}"
+        if _can_write(candidate):
+            logger.warning("输出文件 %s 被占用，改用 %s", base.name, candidate.name)
+            return candidate
+
+    raise PermissionError(f"无法写入输出文件，请关闭占用 {base.name} 的程序后重试")
+
+
 def save_workbook(
     processed_ws: Worksheet,
     input_path: str | Path,
@@ -135,23 +176,25 @@ def save_workbook(
 ) -> Path:
     """将处理后的 Template 写回原文件副本，保留所有其他 sheet。
 
-    1. 复制原文件到输出路径
+    1. 复制原文件到输出路径（只复制内容，不复制权限）
     2. 打开副本，将处理后的单元格值写入 Template sheet
     3. 保存副本
+
+    如果输出文件被其他程序占用，自动在文件名后加序号。
     """
     input_path = Path(input_path)
+    out = _resolve_output_path(
+        input_path,
+        Path(output_path) if output_path is not None else None,
+    )
 
-    if output_path is None:
-        output_path = input_path.parent / f"{input_path.stem}_processed{input_path.suffix}"
-    else:
-        output_path = Path(output_path)
-
-    # 复制原文件（保留所有 sheet、宏、格式）
-    shutil.copy2(str(input_path), str(output_path))
+    # 只复制文件内容，不复制权限元数据
+    # 这样即使源文件是只读的（如浏览器下载），新文件也是可写的
+    shutil.copyfile(str(input_path), str(out))
 
     # 打开副本，只更新 Template sheet 中被修改的列
-    keep_vba = output_path.suffix.lower() == ".xlsm"
-    out_wb = _load_wb(str(output_path), keep_vba=keep_vba)
+    keep_vba = out.suffix.lower() == ".xlsm"
+    out_wb = _load_wb(str(out), keep_vba=keep_vba)
     out_ws = out_wb[template_sheet_name]
 
     # 逐格复制处理后的数据（从 DATA_START_ROW 开始）
@@ -160,5 +203,5 @@ def save_workbook(
             src_val = processed_ws.cell(row=row, column=col).value
             out_ws.cell(row=row, column=col).value = src_val
 
-    out_wb.save(str(output_path))
-    return output_path
+    out_wb.save(str(out))
+    return out

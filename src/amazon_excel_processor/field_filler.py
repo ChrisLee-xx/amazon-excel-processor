@@ -1,8 +1,6 @@
 """变体字段填充模块"""
 
 import logging
-import re
-from typing import Optional
 
 from openpyxl.worksheet.worksheet import Worksheet
 

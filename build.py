@@ -35,8 +35,8 @@ def build():
         "src/amazon_excel_processor/gui_entry.py",
     ]
 
-    if platform.system() == "Windows":
-        cmd.append("--console")
+    # 两个平台都需要控制台窗口（用于显示处理进度和等待用户输入）
+    cmd.append("--console")
 
     print(f"Building for {platform.system()}...")
     print(f"Command: {' '.join(cmd)}\n")

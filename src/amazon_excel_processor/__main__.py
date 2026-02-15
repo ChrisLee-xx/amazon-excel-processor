@@ -36,8 +36,6 @@ def main():
         log_print(f"ERROR: 文件不存在: {input_path}")
         sys.exit(1)
 
-    warnings_count = 0
-
     try:
         log_print(f"📂 读取文件: {input_path} ...")
         wb, ws, template_name = load_workbook(input_path)
@@ -75,7 +73,6 @@ def main():
         log_print("=" * 50)
         log_print(f"  产品组数: {len(groups)}")
         log_print(f"  总行数:   {total_rows}")
-        log_print(f"  警告数:   {warnings_count}")
         log_print(f"  输出文件: {output_path}")
         log_print("=" * 50)
 

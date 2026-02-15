@@ -3,7 +3,7 @@
 import pytest
 from amazon_excel_processor.name_normalizer import (
     collapse_spaces,
-    format_variant_row,
+    extract_base_title,
     remove_numeric_suffix,
     replace_underscores,
     deduplicate_words,
@@ -21,16 +21,15 @@ class TestCollapseSpaces:
         assert collapse_spaces("A B C") == "A B C"
 
 
-class TestFormatVariantRow:
+class TestExtractBaseTitle:
     def test_frame_variant(self):
         name = (
             "Royal Pegasus Under Moon Canvas Print, Mythical Winged Horse Art-1 "
             "Frame-royal Pegasus Under Moon Canvas Print, Mythi08x12inch(20x30cm)"
         )
-        result = format_variant_row(name)
+        result = extract_base_title(name)
         assert result == (
-            "Royal Pegasus Under Moon Canvas Print, Mythical Winged Horse Art-1 "
-            "Frame-style 08x12inch(20x30cm)"
+            "Royal Pegasus Under Moon Canvas Print, Mythical Winged Horse Art-1"
         )
 
     def test_unframe_variant(self):
@@ -38,19 +37,18 @@ class TestFormatVariantRow:
             "Royal Pegasus Under Moon Canvas Print, Mythical Winged Horse Art-1 "
             "Unframe-royal Pegasus Under Moon Canvas Print, Mythi12x18inch(30x45cm)"
         )
-        result = format_variant_row(name)
+        result = extract_base_title(name)
         assert result == (
-            "Royal Pegasus Under Moon Canvas Print, Mythical Winged Horse Art-1 "
-            "Unframe-style 12x18inch(30x45cm)"
+            "Royal Pegasus Under Moon Canvas Print, Mythical Winged Horse Art-1"
         )
 
     def test_parent_row_unchanged(self):
         name = "Royal Pegasus Under Moon Canvas Print, Mythical Winged Horse Art-1"
-        assert format_variant_row(name) == name
+        assert extract_base_title(name) == name
 
-    def test_no_size_pattern_unchanged(self):
-        name = "Some Title Frame-garbage without size"
-        assert format_variant_row(name) == name
+    def test_no_frame_pattern(self):
+        name = "Some Title without frame or size info"
+        assert extract_base_title(name) == name
 
 
 class TestRemoveNumericSuffix:

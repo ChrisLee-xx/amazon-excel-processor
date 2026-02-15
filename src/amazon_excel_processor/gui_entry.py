@@ -1,7 +1,6 @@
 """GUI 友好入口 — 支持拖拽文件或双击运行（无需命令行）"""
 
 import sys
-import os
 import re
 import traceback
 from pathlib import Path
