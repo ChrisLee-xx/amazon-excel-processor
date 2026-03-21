@@ -23,6 +23,7 @@ OPTIONAL_COLUMNS = [
     "Length",
     "Weight",
     "Search Terms",
+    "Item Length Longer Edge",
 ]
 
 HEADER_ROW = 2

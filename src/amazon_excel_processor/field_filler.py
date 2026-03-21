@@ -159,6 +159,18 @@ def clean_search_terms(
             ws.cell(row=row, column=col_idx).value = value.replace("_", " ")
 
 
+def fill_item_length_longer_edge(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+) -> None:
+    """只填充 Item Length Longer Edge 的 parent 行（第1行）为 1。"""
+    if "Item Length Longer Edge" not in col_map:
+        return
+    col_idx = col_map["Item Length Longer Edge"]
+    ws.cell(row=rows[0], column=col_idx).value = 1
+
+
 def fill_group(
     ws: Worksheet,
     rows: list[int],
@@ -173,3 +185,4 @@ def fill_group(
     fill_length(ws, rows, col_map, ratio_type)
     fill_weight(ws, rows, col_map)
     clean_search_terms(ws, rows, col_map)
+    fill_item_length_longer_edge(ws, rows, col_map)
