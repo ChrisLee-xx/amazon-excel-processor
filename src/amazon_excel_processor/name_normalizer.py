@@ -73,7 +73,9 @@ def deduplicate_words(text: str) -> str:
     """单词去重：超过 2 次出现的删除第三次及之后。
 
     case-insensitive 比较，保留原始大小写。
+    先去除单词两端的标点符号再比较。
     """
+    import string
     words = text.split(" ")
     counts: dict[str, int] = {}
     result = []
@@ -82,7 +84,7 @@ def deduplicate_words(text: str) -> str:
         if not word:
             result.append(word)
             continue
-        key = word.lower()
+        key = word.lower().strip(string.punctuation)
         counts[key] = counts.get(key, 0) + 1
         if counts[key] <= 2:
             result.append(word)
