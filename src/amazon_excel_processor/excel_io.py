@@ -21,6 +21,7 @@ OPTIONAL_COLUMNS = [
     "Size",
     "Size Map",
     "Length",
+    "Width",
     "Weight",
     "Search Terms",
     "Item Length Longer Edge",

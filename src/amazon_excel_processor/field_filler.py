@@ -35,6 +35,10 @@ SIZE_SQUARE = [
 LENGTH_32 = ["", 20, 30, 40, 50, 60, 20, 30, 40, 50, 60]
 LENGTH_SQUARE = ["", 30, 40, 50, 60, 70, 30, 40, 50, 60, 70]
 
+WIDTH_32 = ["", 30, 45, 60, 75, 90, 30, 45, 60, 75, 90]
+# 正方形：两边相等，Width 列留空（Length 已是边长）
+WIDTH_SQUARE = ["", "", "", "", "", "", "", "", "", "", ""]
+
 WEIGHT_SEQUENCE = ["", 0.18, 0.28, 0.48, 0.68, 0.88, 0.02, 0.04, 0.07, 0.15, 0.25]
 
 
@@ -131,6 +135,24 @@ def fill_length(
         ws.cell(row=row, column=col_idx).value = sequence[i]
 
 
+def fill_width(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+    ratio_type: str,
+) -> None:
+    """按比例类型填充 Width 列。
+
+    长方形：填宽度值；正方形：两边相等，留空。
+    """
+    if "Width" not in col_map:
+        return
+    col_idx = col_map["Width"]
+    sequence = WIDTH_SQUARE if ratio_type == "square" else WIDTH_32
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = sequence[i]
+
+
 def fill_weight(
     ws: Worksheet,
     rows: list[int],
@@ -183,6 +205,7 @@ def fill_group(
     fill_size(ws, rows, col_map, ratio_type)
     fill_size_map(ws, rows, col_map)
     fill_length(ws, rows, col_map, ratio_type)
+    fill_width(ws, rows, col_map, ratio_type)
     fill_weight(ws, rows, col_map)
     clean_search_terms(ws, rows, col_map)
     fill_item_length_longer_edge(ws, rows, col_map)

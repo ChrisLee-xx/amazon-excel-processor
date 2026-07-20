@@ -9,6 +9,7 @@ from amazon_excel_processor.field_filler import (
     fill_size,
     fill_size_map,
     fill_length,
+    fill_width,
     fill_weight,
     fill_simple_fields,
     COLOR_SEQUENCE,
@@ -17,6 +18,8 @@ from amazon_excel_processor.field_filler import (
     SIZE_MAP_SEQUENCE,
     LENGTH_32,
     LENGTH_SQUARE,
+    WIDTH_32,
+    WIDTH_SQUARE,
     WEIGHT_SEQUENCE,
 )
 
@@ -30,10 +33,11 @@ def _create_test_ws(product_names: list[str]) -> tuple:
     ws.cell(row=1, column=3).value = "Size"
     ws.cell(row=1, column=4).value = "Size Map"
     ws.cell(row=1, column=5).value = "Length"
-    ws.cell(row=1, column=6).value = "Weight"
-    ws.cell(row=1, column=7).value = "Variation Theme"
-    ws.cell(row=1, column=8).value = "Paint Type"
-    ws.cell(row=1, column=9).value = "Color Map"
+    ws.cell(row=1, column=6).value = "Width"
+    ws.cell(row=1, column=7).value = "Weight"
+    ws.cell(row=1, column=8).value = "Variation Theme"
+    ws.cell(row=1, column=9).value = "Paint Type"
+    ws.cell(row=1, column=10).value = "Color Map"
 
     rows = []
     for i, name in enumerate(product_names):
@@ -43,8 +47,8 @@ def _create_test_ws(product_names: list[str]) -> tuple:
 
     col_map = {
         "Product Name": 1, "Color": 2, "Size": 3,
-        "Size Map": 4, "Length": 5, "Weight": 6,
-        "Variation Theme": 7, "Paint Type": 8, "Color Map": 9,
+        "Size Map": 4, "Length": 5, "Width": 6,
+        "Weight": 7, "Variation Theme": 8, "Paint Type": 9, "Color Map": 10,
     }
     return ws, rows, col_map
 
@@ -135,6 +139,20 @@ class TestFillLength:
         fill_length(ws, rows, col_map, "square")
         values = [ws.cell(row=r, column=col_map["Length"]).value for r in rows]
         assert values == LENGTH_SQUARE
+
+
+class TestFillWidth:
+    def test_32_width(self):
+        ws, rows, col_map = _create_test_ws(_make_32_names())
+        fill_width(ws, rows, col_map, "3:2")
+        values = [ws.cell(row=r, column=col_map["Width"]).value for r in rows]
+        assert values == WIDTH_32
+
+    def test_square_width(self):
+        ws, rows, col_map = _create_test_ws(_make_square_names())
+        fill_width(ws, rows, col_map, "square")
+        values = [ws.cell(row=r, column=col_map["Width"]).value for r in rows]
+        assert values == WIDTH_SQUARE
 
 
 class TestFillWeight:
