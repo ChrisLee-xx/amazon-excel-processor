@@ -1,6 +1,7 @@
 """变体字段填充模块"""
 
 import logging
+import re
 
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -50,8 +51,8 @@ def detect_ratio_type(
 ) -> str:
     """检测产品组的比例类型。
 
-    基于 Size 列是否预填判断：正方形组的 Size 列由用户预填（非空），
-    3:2 组的 Size 列为空（由脚本后续填充）。
+    解析 Size 列预填值中的两个数字，L==W 为正方形，L!=W 为 3:2。
+    Size 列为空时默认 3:2（由脚本后续填充）。
     返回 "square" 或 "3:2"。
     """
     if "Size" not in col_map:
@@ -61,8 +62,14 @@ def detect_ratio_type(
         if i == 0:  # 跳过 parent 行（本就为空）
             continue
         value = ws.cell(row=row, column=size_col).value
-        if value is not None and str(value).strip():
-            return "square"
+        if value is None or not str(value).strip():
+            continue
+        # 解析 Size 值中的数字，比较前两个判断长宽是否相等
+        numbers = re.findall(r"\d+", str(value))
+        if len(numbers) >= 2:
+            return "square" if numbers[0] == numbers[1] else "3:2"
+        # 格式无法解析但有值，保守判断为正方形
+        return "square"
     return "3:2"
 
 

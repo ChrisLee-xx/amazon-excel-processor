@@ -97,8 +97,18 @@ class TestDetectRatioType:
         ws, rows, col_map = _create_test_ws(_make_32_names())
         assert detect_ratio_type(ws, rows, col_map) == "3:2"
 
+    def test_32_ratio_size_prefilled_unequal(self):
+        """Size 列预填值 L!=W（如 12L''x08W''）→ 3:2"""
+        ws, rows, col_map = _create_test_ws(_make_32_names())
+        size_col = col_map["Size"]
+        for i, row in enumerate(rows):
+            if i == 0:
+                continue
+            ws.cell(row=row, column=size_col).value = SIZE_32[i]
+        assert detect_ratio_type(ws, rows, col_map) == "3:2"
+
     def test_square_ratio_size_prefilled(self):
-        """Size 列预填非空 → square"""
+        """Size 列预填 L==W（如 12L''x12W''）→ square"""
         ws, rows, col_map = _create_test_ws(_make_square_names())
         size_col = col_map["Size"]
         for i, row in enumerate(rows):
