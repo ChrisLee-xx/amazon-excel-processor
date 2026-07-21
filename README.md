@@ -69,14 +69,16 @@ poetry run excel-process 你的文件.xlsm -o 输出文件.xlsm
 | Paint Type | `Oil` |
 | Color Map | `Multi` |
 | Color | 空, Frame-style×5, Unframe-style×5 |
-| Size | 按比例类型填充（3:2 或正方形） |
+| Size | 3:2 填固定值；正方形保留用户预填值不覆盖 |
 | Size Map | 空, X-Small, Small, Medium, Large, X-Large ×2 |
 | Length | 按比例类型填充 |
+| Width | 3:2 填宽度值；正方形与 Length 一致 |
 | Weight | 空, 0.18, 0.28, 0.48, 0.68, 0.88, 0.02, 0.04, 0.07, 0.15, 0.25 |
+| Your Price | 空, 19.9, 29.9, 45, 75, 99, 11.9, 14.9, 19.9, 24.9, 34.9 |
 
 ### 比例类型自动检测
-- 标题含 `12x12`/`16x16`/`20x20`/`24x24`/`28x28` → 正方形
-- 其余 → 3:2
+- Size 列有预填值（非空）→ 正方形（保留预填值不覆盖）
+- Size 列为空 → 3:2（脚本填充固定尺寸）
 
 ## 输出
 

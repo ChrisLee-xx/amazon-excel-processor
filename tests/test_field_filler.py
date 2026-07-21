@@ -10,6 +10,7 @@ from amazon_excel_processor.field_filler import (
     fill_size_map,
     fill_length,
     fill_width,
+    fill_price,
     fill_weight,
     fill_simple_fields,
     COLOR_SEQUENCE,
@@ -21,6 +22,7 @@ from amazon_excel_processor.field_filler import (
     WIDTH_32,
     WIDTH_SQUARE,
     WEIGHT_SEQUENCE,
+    PRICE_SEQUENCE,
 )
 
 
@@ -38,6 +40,7 @@ def _create_test_ws(product_names: list[str]) -> tuple:
     ws.cell(row=1, column=8).value = "Variation Theme"
     ws.cell(row=1, column=9).value = "Paint Type"
     ws.cell(row=1, column=10).value = "Color Map"
+    ws.cell(row=1, column=11).value = "Your Price"
 
     rows = []
     for i, name in enumerate(product_names):
@@ -49,6 +52,7 @@ def _create_test_ws(product_names: list[str]) -> tuple:
         "Product Name": 1, "Color": 2, "Size": 3,
         "Size Map": 4, "Length": 5, "Width": 6,
         "Weight": 7, "Variation Theme": 8, "Paint Type": 9, "Color Map": 10,
+        "Your Price": 11,
     }
     return ws, rows, col_map
 
@@ -88,13 +92,20 @@ def _make_square_names():
 
 
 class TestDetectRatioType:
-    def test_32_ratio(self):
+    def test_32_ratio_size_empty(self):
+        """Size 列为空 → 3:2"""
         ws, rows, col_map = _create_test_ws(_make_32_names())
-        assert detect_ratio_type(ws, rows, col_map["Product Name"]) == "3:2"
+        assert detect_ratio_type(ws, rows, col_map) == "3:2"
 
-    def test_square_ratio(self):
+    def test_square_ratio_size_prefilled(self):
+        """Size 列预填非空 → square"""
         ws, rows, col_map = _create_test_ws(_make_square_names())
-        assert detect_ratio_type(ws, rows, col_map["Product Name"]) == "square"
+        size_col = col_map["Size"]
+        for i, row in enumerate(rows):
+            if i == 0:
+                continue
+            ws.cell(row=row, column=size_col).value = SIZE_SQUARE[i]
+        assert detect_ratio_type(ws, rows, col_map) == "square"
 
 
 class TestFillColor:
@@ -112,11 +123,16 @@ class TestFillSize:
         values = [ws.cell(row=r, column=col_map["Size"]).value for r in rows]
         assert values == SIZE_32
 
-    def test_square_size(self):
+    def test_square_size_keeps_prefilled(self):
+        """正方形：fill_size 不覆盖用户预填值"""
         ws, rows, col_map = _create_test_ws(_make_square_names())
+        size_col = col_map["Size"]
+        prefilled = [""] + [f"PRE{i}" for i in range(10)]
+        for i, row in enumerate(rows):
+            ws.cell(row=row, column=size_col).value = prefilled[i]
         fill_size(ws, rows, col_map, "square")
-        values = [ws.cell(row=r, column=col_map["Size"]).value for r in rows]
-        assert values == SIZE_SQUARE
+        values = [ws.cell(row=r, column=size_col).value for r in rows]
+        assert values == prefilled
 
 
 class TestFillSizeMap:
@@ -161,6 +177,14 @@ class TestFillWeight:
         fill_weight(ws, rows, col_map)
         values = [ws.cell(row=r, column=col_map["Weight"]).value for r in rows]
         assert values == WEIGHT_SEQUENCE
+
+
+class TestFillPrice:
+    def test_price_sequence(self):
+        ws, rows, col_map = _create_test_ws(_make_32_names())
+        fill_price(ws, rows, col_map)
+        values = [ws.cell(row=r, column=col_map["Your Price"]).value for r in rows]
+        assert values == PRICE_SEQUENCE
 
 
 class TestFillSimpleFields:

@@ -25,6 +25,7 @@ OPTIONAL_COLUMNS = [
     "Weight",
     "Search Terms",
     "Item Length Longer Edge",
+    "Your Price",
 ]
 
 HEADER_ROW = 2

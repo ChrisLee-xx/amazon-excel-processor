@@ -57,7 +57,7 @@ def main():
         log_print("")
 
         for idx, rows in enumerate(groups, 1):
-            ratio_type = detect_ratio_type(ws, rows, product_name_col)
+            ratio_type = detect_ratio_type(ws, rows, col_map)
             log_print(f"  [{idx}/{len(groups)}] 比例: {ratio_type}")
 
             normalize_group(ws, rows, product_name_col, ratio_type)

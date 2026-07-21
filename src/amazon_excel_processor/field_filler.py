@@ -6,8 +6,6 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 logger = logging.getLogger(__name__)
 
-SQUARE_KEYWORDS = {"12x12", "16x16", "20x20", "24x24", "28x28"}
-
 COLOR_SEQUENCE = [
     "",
     "Frame-style", "Frame-style", "Frame-style", "Frame-style", "Frame-style",
@@ -36,26 +34,35 @@ LENGTH_32 = ["", 20, 30, 40, 50, 60, 20, 30, 40, 50, 60]
 LENGTH_SQUARE = ["", 30, 40, 50, 60, 70, 30, 40, 50, 60, 70]
 
 WIDTH_32 = ["", 30, 45, 60, 75, 90, 30, 45, 60, 75, 90]
-# 正方形：两边相等，Width 列留空（Length 已是边长）
-WIDTH_SQUARE = ["", "", "", "", "", "", "", "", "", "", ""]
+# 正方形：两边相等，Width 与 Length 一致
+WIDTH_SQUARE = ["", 30, 40, 50, 60, 70, 30, 40, 50, 60, 70]
 
 WEIGHT_SEQUENCE = ["", 0.18, 0.28, 0.48, 0.68, 0.88, 0.02, 0.04, 0.07, 0.15, 0.25]
 
+# 固定价格表（3:2 和正方形通用）：parent 空，5 Frame + 5 Unframe
+PRICE_SEQUENCE = ["", 19.9, 29.9, 45, 75, 99, 11.9, 14.9, 19.9, 24.9, 34.9]
 
-def detect_ratio_type(ws: Worksheet, rows: list[int], product_name_col: int) -> str:
+
+def detect_ratio_type(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+) -> str:
     """检测产品组的比例类型。
 
-    检查所有行的 Product Name 中是否包含正方形尺寸关键词。
+    基于 Size 列是否预填判断：正方形组的 Size 列由用户预填（非空），
+    3:2 组的 Size 列为空（由脚本后续填充）。
     返回 "square" 或 "3:2"。
     """
-    for row in rows:
-        value = ws.cell(row=row, column=product_name_col).value
-        if value is None:
+    if "Size" not in col_map:
+        return "3:2"
+    size_col = col_map["Size"]
+    for i, row in enumerate(rows):
+        if i == 0:  # 跳过 parent 行（本就为空）
             continue
-        text = str(value)
-        for kw in SQUARE_KEYWORDS:
-            if kw in text:
-                return "square"
+        value = ws.cell(row=row, column=size_col).value
+        if value is not None and str(value).strip():
+            return "square"
     return "3:2"
 
 
@@ -98,13 +105,17 @@ def fill_size(
     col_map: dict[str, int],
     ratio_type: str,
 ) -> None:
-    """按比例类型填充 Size 列。"""
+    """按比例类型填充 Size 列。
+
+    正方形组的 Size 列由用户预填，不覆盖；3:2 组填 SIZE_32。
+    """
     if "Size" not in col_map:
         return
+    if ratio_type == "square":
+        return  # 正方形：保留用户预填值，不覆盖
     col_idx = col_map["Size"]
-    sequence = SIZE_SQUARE if ratio_type == "square" else SIZE_32
     for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = sequence[i]
+        ws.cell(row=row, column=col_idx).value = SIZE_32[i]
 
 
 def fill_size_map(
@@ -143,7 +154,7 @@ def fill_width(
 ) -> None:
     """按比例类型填充 Width 列。
 
-    长方形：填宽度值；正方形：两边相等，留空。
+    3:2：填宽度值；正方形：两边相等，Width 与 Length 一致。
     """
     if "Width" not in col_map:
         return
@@ -164,6 +175,19 @@ def fill_weight(
     col_idx = col_map["Weight"]
     for i, row in enumerate(rows):
         ws.cell(row=row, column=col_idx).value = WEIGHT_SEQUENCE[i]
+
+
+def fill_price(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+) -> None:
+    """填充 Your Price 列（固定价格表，3:2 和正方形通用）。"""
+    if "Your Price" not in col_map:
+        return
+    col_idx = col_map["Your Price"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = PRICE_SEQUENCE[i]
 
 
 def clean_search_terms(
@@ -207,5 +231,6 @@ def fill_group(
     fill_length(ws, rows, col_map, ratio_type)
     fill_width(ws, rows, col_map, ratio_type)
     fill_weight(ws, rows, col_map)
+    fill_price(ws, rows, col_map)
     clean_search_terms(ws, rows, col_map)
     fill_item_length_longer_edge(ws, rows, col_map)

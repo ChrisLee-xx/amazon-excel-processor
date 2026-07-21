@@ -106,7 +106,7 @@ def main():
         log(f">> 共 {len(groups)} 个产品组, {total_rows} 行数据\n")
 
         for idx, rows in enumerate(groups, 1):
-            ratio_type = detect_ratio_type(ws, rows, product_name_col)
+            ratio_type = detect_ratio_type(ws, rows, col_map)
             log(f"  [{idx}/{len(groups)}] 行{rows[0]}-{rows[-1]} 比例: {ratio_type}")
             normalize_group(ws, rows, product_name_col, ratio_type)
             fill_group(ws, rows, col_map, ratio_type)
