@@ -2,23 +2,69 @@
 
 亚马逊上架商品 Excel 模板批量规范化处理工具。
 
+支持两种模式：
+- **单文件模式**：1 个 Excel 走 11 行/组规范化处理
+- **两文件合并模式**：把"普文件"（11 行/组，Frame+Unframe）和"被合并文件"（6 行/组×2/画，木框+金框）合并为 21 行/组的输出文件
+
 ## 直接使用（无需安装开发环境）
 
 ### Mac
 1. 从 `dist/` 目录拿到 `amazon-excel-processor` 文件
-2. 两种使用方式：
-   - **拖拽**：把 `.xlsm` 文件拖到 `amazon-excel-processor` 图标上
-   - **终端**：`./amazon-excel-processor '你的文件.xlsm'`
-3. 处理完成后输出文件为 `{原文件名}_processed.xlsm`，在同一目录下
+2. 使用方式：
+   - **拖拽**：把 `.xlsm` 文件拖到 `amazon-excel-processor` 图标上（单文件模式）
+   - **双击**：双击运行后按提示选择模式 1 或 2
 
 > 首次打开可能提示"无法验证开发者"，右键选"打开"即可。
 
 ### Windows
 1. 从 `dist/` 目录拿到 `amazon-excel-processor.exe` 文件
-2. 两种使用方式：
+2. 使用方式：
    - **拖拽**：把 `.xlsm` 文件拖到 `.exe` 图标上
-   - **双击**：双击运行后粘贴文件路径
-3. 处理完成后输出文件为 `{原文件名}_processed.xlsm`，在同一目录下
+   - **双击**：双击运行后粘贴文件路径 / 选择模式
+
+## 使用流程
+
+### 单文件模式
+把单个 `.xlsm` 文件拖到程序上即可。处理完成后输出 `{原文件名}_processed.xlsm`，在同一目录下。
+
+### 两文件合并模式
+
+适用于"多种框型合并到一个 listing"的场景，例如：
+- **普文件**：包含 `Frame-style` + `Unframe-style` 两种框型
+- **被合并文件（金）**：包含 `Vintage Wood Grain Frame-style`（木框）和 `Vintage Ornate Gold Frame-style`（金框）两种框型
+- **输出**：21 行/组（1 parent + 4 style × 5 size）= Frame×5 + Unframe×5 + Wood×5 + Gold×5
+
+#### 步骤
+1. 双击运行 `.exe` / 程序
+2. 选 `2) 两文件合并`
+3. 依次输入（或拖入）2 个文件路径：
+   - 普文件（主文件，必须含 Frame-style + Unframe-style 两种 style）
+   - 被合并文件（每画 2 个 group，第 1 次=木框，第 2 次=金框）
+4. 按提示输入 SKU 前缀的 3 部分：
+   - **店铺缩写**（如 `HM`）
+   - **日期**（如 `725`）
+   - **主题缩写**（可空，如 `AB`）
+5. 程序自动生成合并文件，输出为 `{普文件名}_processed.xlsm`
+
+#### 合并规则
+- **识别**：
+  - 11 行/组的文件 = 普文件
+  - 6 行/组的文件 = 被合并文件
+- **配对**：按归一化后的 Product Name base name 配对（去 `-数字`、去 Frame-/Unframe-、替换 `-` 为空格、转小写）
+- **输出顺序**：Frame-style → Unframe-style → Vintage Wood Grain Frame-style → Vintage Ornate Gold Frame-style
+- **SKU 重写**：从 `{店铺缩写}{日期}{主题缩写}-1` 开始连续编号（如 `HM725-1`、`HM725-2`、...、`HM725-84`），每画 21 个 SKU
+- **Parent SKU 公式**：
+  - 第 1 个 child：`=B{parent_row}`（引用 parent 的 Seller SKU）
+  - 后续 child：`=AA{prev_row}`（引用上一行的 Seller SKU）
+- **Parentage**：parent=Parent，20 个 child=Child
+- **Relationship Type**：parent 留空，child=Variation
+- **List Price = Your Price**（每行同步填）
+- **Price 序列**（按 style × 5 size）：
+  - Frame：19.9 / 29.9 / 45 / 75 / 99
+  - Unframe：11.9 / 14.9 / 19.9 / 24.9 / 34.9
+  - Wood：26.9 / 39.9 / 59.9 / 99.9 / 129.9
+  - Gold：26.9 / 39.9 / 59.9 / 99.9 / 129.9
+- **Size / Size Map / Length / Width / Weight**：金框和木框的与 Frame×5 完全一致
 
 ## 打包（开发者）
 
@@ -40,21 +86,20 @@ poetry run python build.py
 ```bash
 poetry install
 
-# 基本用法
+# 单文件模式
 poetry run excel-process 你的文件.xlsm
+poetry run excel-process 你的文件.xlsm -v          # 详细日志
+poetry run excel-process 你的文件.xlsm -o 输出.xlsm # 指定输出路径
 
-# 显示详细日志
-poetry run excel-process 你的文件.xlsm -v
-
-# 指定输出路径
-poetry run excel-process 你的文件.xlsm -o 输出文件.xlsm
+# 两文件合并模式 (交互式, 程序会询问店铺缩写/日期/主题)
+poetry run python -m amazon_excel_processor.gui_entry 普文件.xlsm 被合并文件.xlsm
 ```
 
 ## 处理内容
 
-程序读取 Excel 中的 **Template** tab，按每 11 行一组（1 parent + 5 Frame + 5 Unframe）处理：
+### 单文件模式：每 11 行一组（1 parent + 5 Frame + 5 Unframe）
 
-### Product Name 规范化
+#### Product Name 规范化
 1. 多空格合并为单空格
 2. 变体行按固定顺序重构为 `{标题} Frame-style {尺寸}` / `{标题} Unframe-style {尺寸}`
 3. 删除 `-1`、`-2` 等数字后缀
@@ -62,7 +107,7 @@ poetry run excel-process 你的文件.xlsm -o 输出文件.xlsm
 5. 下划线 `_` 替换为空格
 6. 单词去重（同一单词最多保留 2 次）
 
-### 字段填充
+#### 字段填充
 | 字段 | 填充值 |
 |------|--------|
 | Variation Theme | `color-size` |
@@ -76,10 +121,19 @@ poetry run excel-process 你的文件.xlsm -o 输出文件.xlsm
 | Weight | 空, 0.18, 0.28, 0.48, 0.68, 0.88, 0.02, 0.04, 0.07, 0.15, 0.25 |
 | Your Price | 空, 19.9, 29.9, 45, 75, 99, 11.9, 14.9, 19.9, 24.9, 34.9 |
 
-### 比例类型自动检测
+#### 比例类型自动检测
 - 解析 Size 列预填值中的两个数字，L==W → 正方形（保留预填值不覆盖）
 - L!=W → 3:2（脚本填充固定尺寸）
 - Size 列为空 → 3:2（脚本填充固定尺寸）
+
+### 合并模式：每 21 行一组（1 parent + 4 style × 5 size）
+
+输出文件与单文件模式的字段填充规则一致，但增加了：
+- **Color** 多 2 个 style：`Vintage Wood Grain Frame-style` ×5、`Vintage Ornate Gold Frame-style` ×5
+- **Your Price** 多了 2 组价格序列：Wood / Gold 各 5 个
+- **List Price** 列与 Your Price 同步填相同值
+- **Seller SKU** 全部重写为 `{前缀}-N` 格式
+- **Parent SKU** 用公式 `=B{parent_row}` 和 `=AA{prev_row}` 引用
 
 ## 输出
 

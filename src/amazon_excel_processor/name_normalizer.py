@@ -34,6 +34,33 @@ VARIANT_LABELS = [
     "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style",
 ]
 
+# 21 行结构（合并模式输出）：[parent, Frame×5, Unframe×5, Wood×5, Gold×5]
+VARIANT_LABELS_21 = [
+    None,  # parent
+    "Frame-style", "Frame-style", "Frame-style", "Frame-style", "Frame-style",
+    "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style",
+    "Vintage Wood Grain Frame-style", "Vintage Wood Grain Frame-style",
+    "Vintage Wood Grain Frame-style", "Vintage Wood Grain Frame-style", "Vintage Wood Grain Frame-style",
+    "Vintage Ornate Gold Frame-style", "Vintage Ornate Gold Frame-style",
+    "Vintage Ornate Gold Frame-style", "Vintage Ornate Gold Frame-style", "Vintage Ornate Gold Frame-style",
+]
+
+# Size 名 (用于 Product Name 拼接, 与 SIZES_32/SIZES_SQUARE 一致, 但展开为列表)
+SIZES_32_LIST = [
+    "08x12inch(20x30cm)",
+    "12x18inch(30x45cm)",
+    "16x24inch(40x60cm)",
+    "20x30inch(50x75cm)",
+    "24x36inch(60x90cm)",
+]
+SIZES_SQUARE_LIST = [
+    "12x12inch(30x30cm)",
+    "16x16inch(40x40cm)",
+    "20x20inch(50x20cm)",
+    "24x24inch(60x60cm)",
+    "28x28inch(70x70cm)",
+]
+
 
 def collapse_spaces(text: str) -> str:
     """多空格合并为单空格，去首尾空白。"""

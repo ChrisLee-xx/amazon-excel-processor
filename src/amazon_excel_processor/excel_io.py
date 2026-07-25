@@ -26,11 +26,12 @@ OPTIONAL_COLUMNS = [
     "Search Terms",
     "Item Length Longer Edge",
     "Your Price",
+    "List Price",
 ]
 
 HEADER_ROW = 2
 DATA_START_ROW = 4
-GROUP_SIZE = 11
+GROUP_SIZE = 11  # 默认单文件模式 11 行/组; 合并时金文件用 6, 输出用 21
 
 
 def load_workbook(filepath: str | Path):
@@ -122,38 +123,44 @@ def _find_last_data_row(ws: Worksheet, start_row: int = DATA_START_ROW) -> int:
     return last_data_row
 
 
-def group_rows(ws: Worksheet) -> list[list[int]]:
-    """将数据行按 11 行一组分组。
+def group_rows(ws: Worksheet, group_size: int = GROUP_SIZE) -> list[list[int]]:
+    """将数据行按 group_size 行一组分组。
 
-    返回 [[row_num, ...], ...] 列表，每组 11 个行号。
+    返回 [[row_num, ...], ...] 列表。
     不完整尾部组记录警告并跳过。
+
+    Args:
+        ws: 目标 worksheet
+        group_size: 每组行数; 默认 11 (单文件模式),
+                    合并时金文件用 6, 输出用 21
     """
     last_row = _find_last_data_row(ws)
     data_rows = list(range(DATA_START_ROW, last_row + 1))
-    logger.debug("group_rows: last_data_row=%d, total_data_rows=%d", last_row, len(data_rows))
+    logger.debug("group_rows: last_data_row=%d, total_data_rows=%d, group_size=%d",
+                 last_row, len(data_rows), group_size)
 
     if not data_rows:
         logger.warning("template sheet 没有数据行")
         return []
 
     total = len(data_rows)
-    complete_groups = total // GROUP_SIZE
-    remainder = total % GROUP_SIZE
+    complete_groups = total // group_size
+    remainder = total % group_size
 
     if remainder > 0:
         logger.warning(
             "数据行数 %d 不是 %d 的倍数，尾部 %d 行将被跳过",
-            total, GROUP_SIZE, remainder,
+            total, group_size, remainder,
         )
 
     groups = []
     for i in range(complete_groups):
-        start = i * GROUP_SIZE
-        group = data_rows[start: start + GROUP_SIZE]
+        start = i * group_size
+        group = data_rows[start: start + group_size]
         groups.append(group)
 
-    logger.debug("group_rows: %d 个完整组, 首组=%s, 末组=%s",
-                 len(groups),
+    logger.debug("group_rows: %d 个完整组, group_size=%d, 首组=%s, 末组=%s",
+                 len(groups), group_size,
                  groups[0] if groups else "N/A",
                  groups[-1] if groups else "N/A")
     return groups

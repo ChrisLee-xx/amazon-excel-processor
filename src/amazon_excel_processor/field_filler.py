@@ -43,6 +43,183 @@ WEIGHT_SEQUENCE = ["", 0.18, 0.28, 0.48, 0.68, 0.88, 0.02, 0.04, 0.07, 0.15, 0.2
 # 固定价格表（3:2 和正方形通用）：parent 空，5 Frame + 5 Unframe
 PRICE_SEQUENCE = ["", 19.9, 29.9, 45, 75, 99, 11.9, 14.9, 19.9, 24.9, 34.9]
 
+# ===== 合并模式 21 元素序列 =====
+# 结构: [parent, Frame×5, Unframe×5, VintageWood×5, VintageOrnate×5]
+# Wood 和 Gold 的 Size/SizeMap/Length/Width/Weight 与 Frame×5 一致
+# Wood 和 Gold 的 Price 为: 26.9 / 39.9 / 59.9 / 99.9 / 129.9
+
+COLOR_SEQUENCE_21 = [
+    "",
+    "Frame-style", "Frame-style", "Frame-style", "Frame-style", "Frame-style",
+    "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style",
+    "Vintage Wood Grain Frame-style", "Vintage Wood Grain Frame-style",
+    "Vintage Wood Grain Frame-style", "Vintage Wood Grain Frame-style", "Vintage Wood Grain Frame-style",
+    "Vintage Ornate Gold Frame-style", "Vintage Ornate Gold Frame-style",
+    "Vintage Ornate Gold Frame-style", "Vintage Ornate Gold Frame-style", "Vintage Ornate Gold Frame-style",
+]
+
+SIZE_MAP_SEQUENCE_21 = [
+    "",
+    "X-Small", "Small", "Medium", "Large", "X-Large",
+    "X-Small", "Small", "Medium", "Large", "X-Large",
+    "X-Small", "Small", "Medium", "Large", "X-Large",
+    "X-Small", "Small", "Medium", "Large", "X-Large",
+]
+
+SIZE_32_21 = [
+    "",
+    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
+    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
+    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
+    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
+]
+
+LENGTH_32_21 = [""] + [20, 30, 40, 50, 60] * 4  # parent + 4 styles × 5 sizes = 21
+
+WIDTH_32_21 = [""] + [30, 45, 60, 75, 90] * 4
+
+# Weight: parent=空, Frame 和 Wood/Gold 均为 0.18-0.88, Unframe 为 0.02-0.25
+WEIGHT_SEQUENCE_21 = [
+    "",
+    0.18, 0.28, 0.48, 0.68, 0.88,  # Frame×5
+    0.02, 0.04, 0.07, 0.15, 0.25,  # Unframe×5
+    0.18, 0.28, 0.48, 0.68, 0.88,  # Wood×5 (与 Frame×5 一致)
+    0.18, 0.28, 0.48, 0.68, 0.88,  # Gold×5 (与 Frame×5 一致)
+]
+
+# Price: parent=空, Frame: 19.9/29.9/45/75/99, Unframe: 11.9/14.9/19.9/24.9/34.9,
+#        Wood: 26.9/39.9/59.9/99.9/129.9, Gold: 26.9/39.9/59.9/99.9/129.9
+PRICE_SEQUENCE_21 = [
+    "",
+    19.9, 29.9, 45, 75, 99,         # Frame×5
+    11.9, 14.9, 19.9, 24.9, 34.9,   # Unframe×5
+    26.9, 39.9, 59.9, 99.9, 129.9,  # Wood×5
+    26.9, 39.9, 59.9, 99.9, 129.9,  # Gold×5
+]
+
+# List Price = Your Price (每行同步填)
+# 这里直接指向 PRICE_SEQUENCE_21, merger 阶段可共用
+
+
+def fill_list_price(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+) -> None:
+    """List Price 列与 Your Price 列同步填相同值 (合并输出要求)。"""
+    if "List Price" not in col_map or "Your Price" not in col_map:
+        return
+    list_col = col_map["List Price"]
+    price_col = col_map["Your Price"]
+    for row in rows:
+        ws.cell(row=row, column=list_col).value = ws.cell(row=row, column=price_col).value
+
+
+def fill_group_21(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+    ratio_type: str,
+) -> None:
+    """编排 21 行合并产品组的所有字段填充。
+
+    与 fill_group() 类似, 但用 *_21 序列; 同时填 List Price。
+    """
+    fill_simple_fields_21(ws, rows, col_map)
+    fill_color_21(ws, rows, col_map)
+    fill_size_21(ws, rows, col_map, ratio_type)
+    fill_size_map_21(ws, rows, col_map)
+    fill_length_21(ws, rows, col_map, ratio_type)
+    fill_width_21(ws, rows, col_map, ratio_type)
+    fill_weight_21(ws, rows, col_map)
+    fill_price_21(ws, rows, col_map)
+    fill_list_price(ws, rows, col_map)
+    clean_search_terms(ws, rows, col_map)
+    fill_item_length_longer_edge_21(ws, rows, col_map)
+
+
+def fill_simple_fields_21(ws, rows, col_map):
+    simple_fills = {
+        "Variation Theme": "color-size",
+        "Paint Type": "Oil",
+        "Color Map": "Multi",
+    }
+    for field_name, value in simple_fills.items():
+        if field_name not in col_map:
+            continue
+        col_idx = col_map[field_name]
+        for row in rows:
+            ws.cell(row=row, column=col_idx).value = value
+
+
+def fill_color_21(ws, rows, col_map):
+    if "Color" not in col_map:
+        return
+    col_idx = col_map["Color"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = COLOR_SEQUENCE_21[i]
+
+
+def fill_size_21(ws, rows, col_map, ratio_type):
+    if "Size" not in col_map:
+        return
+    if ratio_type == "square":
+        return
+    col_idx = col_map["Size"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = SIZE_32_21[i]
+
+
+def fill_size_map_21(ws, rows, col_map):
+    if "Size Map" not in col_map:
+        return
+    col_idx = col_map["Size Map"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = SIZE_MAP_SEQUENCE_21[i]
+
+
+def fill_length_21(ws, rows, col_map, ratio_type):
+    if "Length" not in col_map:
+        return
+    col_idx = col_map["Length"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = LENGTH_32_21[i]
+
+
+def fill_width_21(ws, rows, col_map, ratio_type):
+    if "Width" not in col_map:
+        return
+    col_idx = col_map["Width"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = WIDTH_32_21[i]
+
+
+def fill_weight_21(ws, rows, col_map):
+    if "Weight" not in col_map:
+        return
+    col_idx = col_map["Weight"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = WEIGHT_SEQUENCE_21[i]
+
+
+def fill_price_21(ws, rows, col_map):
+    if "Your Price" not in col_map:
+        return
+    col_idx = col_map["Your Price"]
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = PRICE_SEQUENCE_21[i]
+
+
+def fill_item_length_longer_edge_21(ws, rows, col_map):
+    """parent 行填 1, child 行按尺寸填实际英寸值 (5 种尺寸循环 4 次)。"""
+    if "Item Length Longer Edge" not in col_map:
+        return
+    col_idx = col_map["Item Length Longer Edge"]
+    # 21 元素: parent=1, 然后 [12,18,24,30,36]×4
+    values = [1] + [12, 18, 24, 30, 36] * 4
+    for i, row in enumerate(rows):
+        ws.cell(row=row, column=col_idx).value = values[i]
+
 
 def detect_ratio_type(
     ws: Worksheet,
