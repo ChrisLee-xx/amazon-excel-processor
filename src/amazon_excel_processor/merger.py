@@ -202,6 +202,7 @@ def merge_one_painting(
     gold_ws=None,
     max_col=None,
     ratio_type="3:2",
+    mode="new",
 ):
     """合并 1 画到 21 行结构.
 
@@ -215,6 +216,8 @@ def merge_one_painting(
         wood_ws: 木框文件 worksheet (用于读 wood_group 数据)
         gold_ws: 金框文件 worksheet (用于读 gold_group 数据)
         max_col: 列数
+        mode: "new" = 新品上架 (全部 21 行 normalize + fill + meta)
+              "old_variant" = 老品补充变体 (普文件原 11 行保留不动, 仅 Wood/Gold 行处理)
     """
     assert len(main_snapshots) == MAIN_GROUP_SIZE
     assert len(wood_group) == VARIANT_GROUP_SIZE
@@ -251,11 +254,154 @@ def merge_one_painting(
         _write_row(output_ws, dst, snap, max_col)
         merged_rows.append(dst)
 
-    normalize_group_21(output_ws, merged_rows, COL_PRODUCT_NAME, ratio_type)
-    fill_group_21(output_ws, merged_rows, col_map, ratio_type)
-    _fill_meta_columns(output_ws, merged_rows, col_map)
+    if mode == "new":
+        # 新品上架: 全部 21 行 normalize + fill + meta
+        normalize_group_21(output_ws, merged_rows, COL_PRODUCT_NAME, ratio_type)
+        fill_group_21(output_ws, merged_rows, col_map, ratio_type)
+        _fill_meta_columns(output_ws, merged_rows, col_map)
+    elif mode == "old_variant":
+        # 老品补充变体: 普文件原 11 行 (rows[0:11]) 完全不动
+        # 仅对 Wood/Gold 行 (rows[11:21]) 做 normalize + fill + meta
+        variant_rows = merged_rows[11:]
+        _normalize_variant_names(output_ws, merged_rows, variant_rows, COL_PRODUCT_NAME, ratio_type)
+        _fill_variant_fields(output_ws, variant_rows, col_map, ratio_type)
+        _fill_meta_columns_variant(output_ws, variant_rows, col_map)
+    else:
+        raise ValueError(f"未知 mode: {mode}")
 
     return merged_rows
+
+
+def _normalize_variant_names(ws, all_rows, variant_rows, name_col, ratio_type="3:2"):
+    """老品补充模式: 只对 Wood/Gold 行 (variant_rows) 做 Product Name 规范化.
+
+    base_title 从 parent 行 (all_rows[0]) 提取, 但不修改 parent 行.
+    """
+    sizes = SIZES_32
+    parent_cell = ws.cell(row=all_rows[0], column=name_col)
+    parent_value = parent_cell.value
+    if parent_value is None:
+        return
+    base_title = extract_base_title(str(parent_value))
+    base_title = remove_numeric_suffix(base_title)
+    base_title = collapse_spaces(base_title)
+
+    # variant_rows 对应 VARIANT_LABELS_21[11:21], size_idx 从 0 开始
+    for i, row in enumerate(variant_rows):
+        cell = ws.cell(row=row, column=name_col)
+        value = cell.value
+        if value is None:
+            continue
+        label = VARIANT_LABELS_21[11 + i]
+        size_idx = i % 5
+        size = sizes[size_idx]
+        name = f"{base_title} {label} {size}"
+        name = collapse_spaces(name)
+        name = remove_numeric_suffix(name)
+        name = replace_hyphens(name)
+        name = replace_underscores(name)
+        name = deduplicate_words(name)
+        name = collapse_spaces(name)
+        cell.value = name
+
+
+def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2"):
+    """老品补充模式: 只对 Wood/Gold 行 (variant_rows) 填充字段.
+
+    使用 COLOR_SEQUENCE_21[11:21] / PRICE_SEQUENCE_21[11:21] 等.
+    """
+    from .field_filler import (
+        COLOR_SEQUENCE_21, SIZE_MAP_SEQUENCE_21, SIZE_32_21,
+        LENGTH_32_21, WIDTH_32_21, WEIGHT_SEQUENCE_21, PRICE_SEQUENCE_21,
+    )
+
+    # Wood/Gold 行在 21 元素序列中的偏移量是 11
+    offset = 11
+
+    if "Color" in col_map:
+        col = col_map["Color"]
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = COLOR_SEQUENCE_21[offset + i]
+
+    if "Size" in col_map and ratio_type != "square":
+        col = col_map["Size"]
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = SIZE_32_21[offset + i]
+
+    if "Size Map" in col_map:
+        col = col_map["Size Map"]
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = SIZE_MAP_SEQUENCE_21[offset + i]
+
+    if "Length" in col_map:
+        col = col_map["Length"]
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = LENGTH_32_21[offset + i]
+
+    if "Width" in col_map:
+        col = col_map["Width"]
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = WIDTH_32_21[offset + i]
+
+    if "Weight" in col_map:
+        col = col_map["Weight"]
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = WEIGHT_SEQUENCE_21[offset + i]
+
+    if "Your Price" in col_map:
+        col = col_map["Your Price"]
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = PRICE_SEQUENCE_21[offset + i]
+
+    # List Price = Your Price
+    if "List Price" in col_map and "Your Price" in col_map:
+        lp_col = col_map["List Price"]
+        yp_col = col_map["Your Price"]
+        for row in variant_rows:
+            ws.cell(row=row, column=lp_col).value = ws.cell(row=row, column=yp_col).value
+
+    # Variation Theme / Paint Type / Color Map
+    simple_fills = {"Variation Theme": "color-size", "Paint Type": "Oil", "Color Map": "Multi"}
+    for field, val in simple_fills.items():
+        if field in col_map:
+            col = col_map[field]
+            for row in variant_rows:
+                ws.cell(row=row, column=col).value = val
+
+    # Item Length Longer Edge: [12, 18, 24, 30, 36] × 2 (Wood + Gold)
+    if "Item Length Longer Edge" in col_map:
+        col = col_map["Item Length Longer Edge"]
+        edge_values = [12, 18, 24, 30, 36] * 2
+        for i, row in enumerate(variant_rows):
+            ws.cell(row=row, column=col).value = edge_values[i]
+
+    # Search Terms: 替换下划线
+    if "Search Terms" in col_map:
+        col = col_map["Search Terms"]
+        for row in variant_rows:
+            v = ws.cell(row=row, column=col).value
+            if v is not None and isinstance(v, str) and "_" in v:
+                ws.cell(row=row, column=col).value = v.replace("_", " ")
+
+
+def _fill_meta_columns_variant(ws, variant_rows, col_map):
+    """老品补充模式: 只对 Wood/Gold 行设 Parentage/Relationship Type/Variation Theme/Package Level."""
+    if "Variation Theme" in col_map:
+        col = col_map["Variation Theme"]
+        for r in variant_rows:
+            ws.cell(row=r, column=col).value = "color-size"
+    if "Package Level" in col_map:
+        col = col_map["Package Level"]
+        for r in variant_rows:
+            ws.cell(row=r, column=col).value = "unit"
+    if "Parentage" in col_map:
+        col = col_map["Parentage"]
+        for r in variant_rows:
+            ws.cell(row=r, column=col).value = "Child"
+    if "Relationship Type" in col_map:
+        col = col_map["Relationship Type"]
+        for r in variant_rows:
+            ws.cell(row=r, column=col).value = "Variation"
 
 
 def normalize_group_21(ws, rows, name_col, ratio_type="3:2"):
@@ -466,6 +612,7 @@ def merge_files(
             wood_ws=wood_ws,
             gold_ws=gold_ws,
             max_col=max_col_for_snapshot,
+            mode=mode,
         )
         new_groups.append(merged)
         out_row += MERGED_GROUP_SIZE

@@ -270,6 +270,69 @@ class TestMergeOnePainting:
         assert wood_child_sku == "WOOD-5"
         assert gold_child_sku == "GOLD-5"
 
+    def test_old_variant_mode_preserves_main_rows(self):
+        """老品补充变体模式: 普文件原 11 行 (r4-r14) 完全不动, 仅 Wood/Gold 行处理"""
+        s = _setup_merge_one_painting()
+        main_ws = s["main_ws"]
+        main_col_map = s["main_col_map"]
+        main_snapshots = s["main_snapshots"]
+
+        # 先记录普文件原 11 行的所有列值 (从快照)
+        original_values = {}
+        for i in range(11):
+            for c, v in main_snapshots[i].items():
+                original_values[(i, c)] = v
+
+        # 用老品补充模式合并
+        merge_one_painting(
+            main_snapshots=main_snapshots,
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
+            output_start_row=4,
+            output_ws=main_ws,
+            col_map=main_col_map,
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
+            mode="old_variant",
+        )
+
+        # 验证 r4-r14 (普文件原 11 行) 的所有列值没变
+        for i in range(11):
+            r = 4 + i
+            for c in range(1, s["max_col"] + 1):
+                orig = original_values[(i, c)]
+                now = main_ws.cell(row=r, column=c).value
+                # 空字符串和 None 视为相同
+                orig_e = orig if orig not in (None, "") else ""
+                now_e = now if now not in (None, "") else ""
+                assert orig_e == now_e, f"r{r} col{c}: 原值={orig} 现值={now} (老品补充不应修改普文件原行)"
+
+    def test_old_variant_mode_wood_gold_color_price(self):
+        """老品补充变体模式: Wood/Gold 行的 Color 和 Price 仍正确填充"""
+        s = _setup_merge_one_painting()
+        main_ws = s["main_ws"]
+        merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
+            output_start_row=4,
+            output_ws=main_ws,
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
+            mode="old_variant",
+        )
+        # Wood r15-r19
+        for i, r in enumerate(range(15, 20)):
+            assert main_ws.cell(row=r, column=38).value == "Vintage Wood Grain Frame-style"
+            assert main_ws.cell(row=r, column=13).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
+        # Gold r20-r24
+        for i, r in enumerate(range(20, 25)):
+            assert main_ws.cell(row=r, column=38).value == "Vintage Ornate Gold Frame-style"
+            assert main_ws.cell(row=r, column=13).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
+
 
 # ===== rewrite_sku =====
 
