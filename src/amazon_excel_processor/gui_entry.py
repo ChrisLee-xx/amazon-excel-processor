@@ -132,11 +132,23 @@ def _run_merge(main_path: Path, wood_path: Path, gold_path: Path, flog: logging.
     log(f"  金框文件:    {gold_path}")
     log("")
 
-    log("请输入 SKU 前缀的 3 个部分 (店铺缩写+日期+主题缩写):")
-    shop = input("  店铺缩写 (如 HM): ").strip()
-    date = input("  日期     (如 725): ").strip()
-    theme = input("  主题缩写 (可空): ").strip()
-    log(f"  → 组合前缀: {shop}{date}{theme}")
+    # 第 1 步: 选择上架类型
+    log("请选择上架类型:")
+    log("  1) 新品上架      (所有 SKU 按新命名规则重新编号)")
+    log("  2) 老品补充变体  (普文件原 SKU 保留, 仅金+木 SKU 按新规则编号)")
+    list_type = _prompt_choice("  输入 [1/2]: ", ["1", "2"])
+    mode = "new" if list_type == "1" else "old_variant"
+    mode_label = "新品上架" if mode == "new" else "老品补充变体"
+    log(f"  → {mode_label}")
+    log("")
+
+    # 第 2 步: 输入 SKU 前缀
+    log("请输入 SKU 命名 (推荐格式: 店铺名+日期+主题, 如 HM725):")
+    sku_prefix = input("  SKU 命名: ").strip()
+    if not sku_prefix:
+        print("ERROR: SKU 命名不能为空")
+        pause_exit(1)
+    log(f"  → SKU 前缀: {sku_prefix}")
     log("")
 
     log(">> 开始合并 ...")
@@ -144,15 +156,14 @@ def _run_merge(main_path: Path, wood_path: Path, gold_path: Path, flog: logging.
         main_path=main_path,
         wood_path=wood_path,
         gold_path=gold_path,
-        shop=shop,
-        date=date,
-        theme=theme,
+        sku_prefix=sku_prefix,
+        mode=mode,
     )
-    flog.info("合并输出: %s", output_path)
+    flog.info("合并输出: %s (mode=%s)", output_path, mode)
 
     log("")
     log("=" * 50)
-    log("  [OK] 合并完成")
+    log(f"  [OK] 合并完成 ({mode_label})")
     log("=" * 50)
     log(f"  输出文件: {output_path}")
     log("=" * 50)

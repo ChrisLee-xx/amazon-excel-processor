@@ -274,48 +274,102 @@ class TestMergeOnePainting:
 # ===== rewrite_sku =====
 
 class TestRewriteSku:
-    def test_continuous_numbering(self):
+    def test_continuous_numbering_new_mode(self):
+        """新品上架: 全部 21 行 × N 画从 prefix-1 连续编号"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25)), list(range(25, 46))]
-        rewrite_sku(ws, groups, prefix="HM725")
+        rewrite_sku(ws, groups, prefix="HM725", mode="new")
         assert ws.cell(row=4, column=2).value == "HM725-1"
         assert ws.cell(row=5, column=2).value == "HM725-2"
         assert ws.cell(row=24, column=2).value == "HM725-21"
         assert ws.cell(row=25, column=2).value == "HM725-22"
         assert ws.cell(row=45, column=2).value == "HM725-42"
 
-    def test_single_group(self):
+    def test_single_group_new_mode(self):
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25))]
-        rewrite_sku(ws, groups, prefix="AB")
+        rewrite_sku(ws, groups, prefix="AB", mode="new")
         assert ws.cell(row=4, column=2).value == "AB-1"
         assert ws.cell(row=24, column=2).value == "AB-21"
+
+    def test_old_variant_mode_preserves_main_sku(self):
+        """老品补充变体: group[0:11] (普文件原 11 行) SKU 保留, group[11:21] 重写"""
+        wb = Workbook()
+        ws = wb.active
+        groups = [list(range(4, 25))]
+        # 预设普文件原 11 行的 SKU (group[0:11] = r4-r14)
+        for i, r in enumerate(groups[0][:11]):
+            ws.cell(row=r, column=2).value = f"OLD-{i+1}"
+        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant")
+        # r4-r14 保留原 SKU
+        assert ws.cell(row=4, column=2).value == "OLD-1"
+        assert ws.cell(row=14, column=2).value == "OLD-11"
+        # r15-r24 (Wood+Gold) 用新前缀从 1 开始
+        assert ws.cell(row=15, column=2).value == "NEW-1"
+        assert ws.cell(row=16, column=2).value == "NEW-2"
+        assert ws.cell(row=24, column=2).value == "NEW-10"
+
+    def test_old_variant_mode_multi_groups_continuous(self):
+        """老品补充变体: 多 group 时 Wood/Gold 跨 group 连续编号"""
+        wb = Workbook()
+        ws = wb.active
+        groups = [list(range(4, 25)), list(range(25, 46))]
+        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant")
+        # group 1: r15-r24 = NEW-1 到 NEW-10
+        assert ws.cell(row=15, column=2).value == "NEW-1"
+        assert ws.cell(row=24, column=2).value == "NEW-10"
+        # group 2: r36-r45 = NEW-11 到 NEW-20
+        assert ws.cell(row=36, column=2).value == "NEW-11"
+        assert ws.cell(row=45, column=2).value == "NEW-20"
 
 
 # ===== write_parent_sku_formulas =====
 
 class TestWriteParentSkuFormulas:
-    def test_first_child_uses_b_parent(self):
+    def test_first_child_uses_b_parent_new_mode(self):
+        """新品上架: parent 清空, 第 1 child =B4, 后续 =AA{prev}"""
         wb = Workbook()
         ws = wb.active
         rows = list(range(4, 25))
-        write_parent_sku_formulas(ws, [rows])
+        write_parent_sku_formulas(ws, [rows], mode="new")
         assert ws.cell(row=4, column=27).value in (None, "")
         assert ws.cell(row=5, column=27).value == "=B4"
         assert ws.cell(row=6, column=27).value == "=AA5"
         assert ws.cell(row=7, column=27).value == "=AA6"
         assert ws.cell(row=24, column=27).value == "=AA23"
 
-    def test_multiple_groups(self):
+    def test_multiple_groups_new_mode(self):
         wb = Workbook()
         ws = wb.active
-        write_parent_sku_formulas(ws, [list(range(4, 25)), list(range(25, 46))])
+        write_parent_sku_formulas(ws, [list(range(4, 25)), list(range(25, 46))], mode="new")
         assert ws.cell(row=5, column=27).value == "=B4"
         assert ws.cell(row=6, column=27).value == "=AA5"
         assert ws.cell(row=26, column=27).value == "=B25"
         assert ws.cell(row=27, column=27).value == "=AA26"
+
+    def test_old_variant_mode_preserves_main_formulas(self):
+        """老品补充变体: group[0:11] parent SKU 公式保留, group[11:21] 从 =AA{group[10]} 开始"""
+        wb = Workbook()
+        ws = wb.active
+        rows = list(range(4, 25))
+        # 预设普文件原 11 行的 parent SKU 公式
+        ws.cell(row=4, column=27).value = None       # parent
+        ws.cell(row=5, column=27).value = "=B4"      # Frame 1
+        ws.cell(row=6, column=27).value = "=AA5"
+        ws.cell(row=14, column=27).value = "=AA13"   # Unframe 5 (最后一个)
+        write_parent_sku_formulas(ws, [rows], mode="old_variant")
+        # r4-r14 保留
+        assert ws.cell(row=4, column=27).value is None
+        assert ws.cell(row=5, column=27).value == "=B4"
+        assert ws.cell(row=14, column=27).value == "=AA13"
+        # r15 (Wood 1) = =AA14 (引用 r14 Unframe 最后一个)
+        assert ws.cell(row=15, column=27).value == "=AA14"
+        # r16 = =AA15
+        assert ws.cell(row=16, column=27).value == "=AA15"
+        # r24 (Gold 5) = =AA23
+        assert ws.cell(row=24, column=27).value == "=AA23"
 
 
 # ===== fill_list_price_synced =====
@@ -348,11 +402,11 @@ class TestFillListPriceSynced:
 # ===== build_sku_prefix =====
 
 class TestBuildSkuPrefix:
-    def test_concat_three_parts(self):
-        assert build_sku_prefix("HM", "725", "AB") == "HM725AB"
-
-    def test_empty_theme(self):
-        assert build_sku_prefix("HM", "725", "") == "HM725"
+    def test_single_string(self):
+        assert build_sku_prefix("HM725") == "HM725"
 
     def test_strip_whitespace(self):
-        assert build_sku_prefix(" HM ", " 725 ", " AB ") == "HM725AB"
+        assert build_sku_prefix("  HM725  ") == "HM725"
+
+    def test_complex_prefix(self):
+        assert build_sku_prefix("AB2026风景") == "AB2026风景"

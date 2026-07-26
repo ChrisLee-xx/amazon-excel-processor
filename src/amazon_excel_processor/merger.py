@@ -66,8 +66,9 @@ COL_WEIGHT = 69
 COL_LIST_PRICE = 145
 
 
-def build_sku_prefix(shop, date, theme):
-    return f"{shop.strip()}{date.strip()}{theme.strip()}"
+def build_sku_prefix(sku):
+    """SKU 前缀直接用用户输入的字符串 (推荐格式: 店铺名+日期+主题, 如 HM725)."""
+    return sku.strip()
 
 
 def identify_file_role(groups):
@@ -288,27 +289,75 @@ def normalize_group_21(ws, rows, name_col, ratio_type="3:2"):
         cell.value = name
 
 
-def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU):
-    counter = 1
-    for group in groups:
-        for row in group:
-            ws.cell(row=row, column=sku_col).value = f"{prefix}-{counter}"
-            counter += 1
+def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new"):
+    """重写 Seller SKU.
+
+    Args:
+        ws: 目标 worksheet
+        groups: 多个 21 行 group
+        prefix: SKU 前缀 (如 HM725)
+        sku_col: Seller SKU 列
+        mode: "new" = 新品上架 (全部 21 行 × N 画从 prefix-1 连续编号)
+              "old_variant" = 老品补充变体 (普文件原 11 行 SKU 保留,
+                              新增 Wood/Gold 10 行 × N 画从 prefix-1 连续编号)
+    """
+    if mode == "new":
+        counter = 1
+        for group in groups:
+            for row in group:
+                ws.cell(row=row, column=sku_col).value = f"{prefix}-{counter}"
+                counter += 1
+    elif mode == "old_variant":
+        # 普文件原 11 行 (group[0:11]) SKU 保留, 新增 Wood/Gold 行 (group[11:21]) 重写
+        counter = 1
+        for group in groups:
+            for row in group[11:]:  # Wood×5 + Gold×5 = 10 行
+                ws.cell(row=row, column=sku_col).value = f"{prefix}-{counter}"
+                counter += 1
+    else:
+        raise ValueError(f"未知 mode: {mode}, 期望 'new' 或 'old_variant'")
 
 
-def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_sku_col=COL_SELLER_SKU):
+def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_sku_col=COL_SELLER_SKU, mode="new"):
+    """写 Parent SKU 公式.
+
+    Args:
+        ws: 目标 worksheet
+        groups: 多个 21 行 group
+        parent_sku_col: Parent SKU 列
+        seller_sku_col: Seller SKU 列
+        mode: "new" = 新品上架 (全部 21 行 parent SKU 公式重写)
+              "old_variant" = 老品补充变体 (普文件原 11 行保留,
+                              新增 Wood/Gold 行从 =AA{prev_unframe_last} 开始链式引用)
+    """
+    seller_letter = _col_letter(seller_sku_col)
+    parent_sku_letter = _col_letter(parent_sku_col)
+
     for group in groups:
         if len(group) < 2:
             continue
-        parent_row = group[0]
-        first_child = group[1]
-        ws.cell(row=parent_row, column=parent_sku_col).value = None
-        seller_letter = _col_letter(seller_sku_col)
-        ws.cell(row=first_child, column=parent_sku_col).value = f"={seller_letter}{parent_row}"
-        parent_sku_letter = _col_letter(parent_sku_col)
-        for i in range(2, len(group)):
-            prev_row = group[i - 1]
-            ws.cell(row=group[i], column=parent_sku_col).value = f"={parent_sku_letter}{prev_row}"
+
+        if mode == "new":
+            # 全部重写: parent 清空, 第 1 child =B{parent}, 后续 =AA{prev}
+            parent_row = group[0]
+            first_child = group[1]
+            ws.cell(row=parent_row, column=parent_sku_col).value = None
+            ws.cell(row=first_child, column=parent_sku_col).value = f"={seller_letter}{parent_row}"
+            for i in range(2, len(group)):
+                prev_row = group[i - 1]
+                ws.cell(row=group[i], column=parent_sku_col).value = f"={parent_sku_letter}{prev_row}"
+
+        elif mode == "old_variant":
+            # 普文件原 11 行 (group[0:11]) parent SKU 公式保留
+            # 新增 Wood/Gold 行 (group[11:21]) 从 =AA{group[10]} 开始链式
+            # group[10] = Unframe 最后一个, group[11] = Wood 第 1 个
+            prev_row = group[10]  # Unframe 最后一个
+            for i in range(11, len(group)):
+                ws.cell(row=group[i], column=parent_sku_col).value = f"={parent_sku_letter}{prev_row}"
+                prev_row = group[i]
+
+        else:
+            raise ValueError(f"未知 mode: {mode}, 期望 'new' 或 'old_variant'")
 
 
 def fill_list_price_synced(ws, rows, col_map):
@@ -319,9 +368,8 @@ def merge_files(
     main_path,
     wood_path,
     gold_path,
-    shop,
-    date,
-    theme="",
+    sku_prefix,
+    mode="new",
     output_path=None,
 ):
     """三文件合并主入口.
@@ -330,9 +378,9 @@ def merge_files(
         main_path: 普文件 (11 行/组, Frame+Unframe)
         wood_path: 木框文件 (6 行/组, 每画 1 个 group)
         gold_path: 金框文件 (6 行/组, 每画 1 个 group)
-        shop: 店铺缩写
-        date: 日期
-        theme: 主题缩写 (可空)
+        sku_prefix: SKU 前缀 (如 HM725, 推荐格式 店铺名+日期+主题)
+        mode: "new" = 新品上架 (全部 SKU 重写)
+              "old_variant" = 老品补充变体 (普文件原 SKU 保留, 仅 Wood/Gold 重写)
         output_path: 输出路径 (默认: {main_stem}_processed.xlsm)
 
     Returns:
@@ -341,9 +389,9 @@ def merge_files(
     main_path = Path(main_path)
     wood_path = Path(wood_path)
     gold_path = Path(gold_path)
-    prefix = build_sku_prefix(shop, date, theme)
-    logger.info("合并开始: main=%s, wood=%s, gold=%s, prefix=%s",
-                main_path.name, wood_path.name, gold_path.name, prefix)
+    prefix = build_sku_prefix(sku_prefix)
+    logger.info("合并开始: main=%s, wood=%s, gold=%s, prefix=%s, mode=%s",
+                main_path.name, wood_path.name, gold_path.name, prefix, mode)
 
     main_wb, main_ws, main_sheet = load_workbook(main_path)
     wood_wb, wood_ws, _ = load_workbook(wood_path)
@@ -422,8 +470,8 @@ def merge_files(
         new_groups.append(merged)
         out_row += MERGED_GROUP_SIZE
 
-    rewrite_sku(main_ws, new_groups, prefix)
-    write_parent_sku_formulas(main_ws, new_groups)
+    rewrite_sku(main_ws, new_groups, prefix, mode=mode)
+    write_parent_sku_formulas(main_ws, new_groups, mode=mode)
 
     out = save_workbook(
         main_ws,

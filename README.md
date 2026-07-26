@@ -44,11 +44,11 @@
    - 普文件（主文件，必须含 Frame-style + Unframe-style）
    - 木框文件（每画 1 个 group）
    - 金框文件（每画 1 个 group）
-4. 按提示输入 SKU 前缀的 3 部分：
-   - **店铺缩写**（如 `HM`）
-   - **日期**（如 `725`）
-   - **主题缩写**（可空，如 `AB`）
-5. 程序自动生成合并文件，输出为 `{普文件名}_processed.xlsm`
+4. 选择上架类型：
+   - `1) 新品上架`：所有 SKU（普+木+金）按新命名规则重新编号
+   - `2) 老品补充变体`：普文件原 SKU 保留，仅金+木 SKU 按新规则编号
+5. 输入 SKU 命名（推荐格式：店铺名+日期+主题，如 `HM725`，非空即可）
+6. 程序自动生成合并文件，输出为 `{普文件名}_processed.xlsm`
 
 #### 合并规则
 - **识别**：
@@ -56,10 +56,12 @@
   - 6 行/组的文件 = 木框或金框（由用户在 GUI 指定顺序）
 - **配对**：按归一化后的 Product Name base name 配对（去 `-数字`、去 Frame-/Unframe-、替换 `-` 为空格、转小写）
 - **输出顺序**：Frame-style → Unframe-style → Vintage Wood Grain Frame-style → Vintage Ornate Gold Frame-style
-- **SKU 重写**：从 `{店铺缩写}{日期}{主题缩写}-1` 开始连续编号（如 `HM725-1`、`HM725-2`、...、`HM725-84`），每画 21 个 SKU
-- **Parent SKU 公式**：
-  - 第 1 个 child：`=B{parent_row}`（引用 parent 的 Seller SKU）
-  - 后续 child：`=AA{prev_row}`（引用上一行的 Seller SKU）
+- **上架类型**：
+  - **新品上架**：全部 21 行 × N 画 SKU 从 `{前缀}-1` 开始连续编号（如 `HM725-1` 到 `HM725-84`），所有 parent SKU 公式重写
+  - **老品补充变体**：普文件原 11 行（parent + Frame×5 + Unframe×5）SKU 和 parent SKU 公式保留不变；新增 Wood×5 + Gold×5（10 行 × N 画）SKU 从 `{前缀}-1` 开始连续编号，parent SKU 公式从 `=AA{prev_unframe_last}` 开始链式引用
+- **Parent SKU 公式规则**：
+  - 新品上架：parent 行清空，第 1 个 child `=B{parent_row}`，后续 `=AA{prev_row}`
+  - 老品补充变体：普文件原 11 行保留，新增 Wood/Gold 行从 `=AA{unframe_last_row}` 开始链式
 - **Parentage**：parent=Parent，20 个 child=Child
 - **Relationship Type**：parent 留空，child=Variation
 - **List Price = Your Price**（每行同步填）
