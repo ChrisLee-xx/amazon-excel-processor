@@ -1,8 +1,21 @@
-"""两文件合并模块"""
+"""三文件合并模块
+
+输入 3 个文件:
+  - main_path: 普文件 (11 行/组, 含 Frame+Unframe 2 个 style)
+  - wood_path: 木框文件 (6 行/组, 每画 1 个 group, 对应 Vintage Wood Grain Frame-style)
+  - gold_path: 金框文件 (6 行/组, 每画 1 个 group, 对应 Vintage Ornate Gold Frame-style)
+
+合并输出 21 行/组(1 parent + 4 style × 5 size) 的新 Excel, 顺序固定:
+  1. Frame-style (5 尺寸, 来自 main)
+  2. Unframe-style (5 尺寸, 来自 main)
+  3. Vintage Wood Grain Frame-style (5 尺寸, 来自 wood)
+  4. Vintage Ornate Gold Frame-style (5 尺寸, 来自 gold)
+
+用户在 GUI 中按 [主, 木, 金] 顺序指定 3 个文件, 不再依赖"第 1 次/第 2 次"假设.
+"""
 
 import logging
 import re
-from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
@@ -30,8 +43,8 @@ from .name_normalizer import (
 logger = logging.getLogger(__name__)
 
 MERGED_GROUP_SIZE = 21
-GOLD_GROUP_SIZE = 6
-MAIN_GROUP_SIZE = 11
+VARIANT_GROUP_SIZE = 6   # 木/金文件每画 1 个 group, 6 行
+MAIN_GROUP_SIZE = 11     # 普文件每画 1 个 group, 11 行
 
 WOOD_STYLE = "Vintage Wood Grain Frame-style"
 GOLD_STYLE = "Vintage Ornate Gold Frame-style"
@@ -57,15 +70,28 @@ def build_sku_prefix(shop, date, theme):
     return f"{shop.strip()}{date.strip()}{theme.strip()}"
 
 
-def identify_main_file(groups):
+def identify_file_role(groups):
+    """根据 group 长度识别文件角色.
+
+    Returns:
+        ("main", None)  — 11 行/组, 普文件
+        ("variant", None) — 6 行/组, 木或金文件 (具体由用户在 GUI 指定)
+        ("unknown", None) — 无法识别
+    """
     if not groups:
-        return False, False
+        return "unknown", None
     first = groups[0]
     if len(first) == MAIN_GROUP_SIZE:
-        return True, False
-    if len(first) == GOLD_GROUP_SIZE:
-        return False, True
-    return False, False
+        return "main", None
+    if len(first) == VARIANT_GROUP_SIZE:
+        return "variant", None
+    return "unknown", None
+
+
+# 保留旧名向后兼容
+def identify_main_file(groups):
+    role, _ = identify_file_role(groups)
+    return (role == "main", role == "variant")
 
 
 def _normalize_name_for_compare(name):
@@ -74,7 +100,7 @@ def _normalize_name_for_compare(name):
     s = str(name)
     s = extract_base_title(s)
     s = remove_numeric_suffix(s)
-    # 主文件有 "Henri Matisse - Harmony in Red" 格式, 金文件无 "-".
+    # 主文件有 "Henri Matisse - Harmony in Red" 格式, 木/金文件无 "-".
     # 配对前统一替换 "- " (连字符+空格) 为单空格.
     s = re.sub(r"\s*-\s*", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
@@ -87,11 +113,29 @@ def _group_base_name(ws, group, name_col=COL_PRODUCT_NAME):
     return _normalize_name_for_compare(str(v) if v else "")
 
 
-def pair_gold_groups(ws, groups, name_col=COL_PRODUCT_NAME):
-    by_name = defaultdict(list)
+def index_groups_by_name(ws, groups, name_col=COL_PRODUCT_NAME):
+    """把 groups 按 base name 索引, 返回 {base_name: group}.
+
+    要求每个 base name 只出现 1 次 (每画 1 个 group).
+    """
+    by_name = {}
     for g in groups:
         name = _group_base_name(ws, g, name_col)
-        by_name[name].append(g)
+        if name in by_name:
+            raise ValueError(
+                f"base name '{name}' 在文件中出现多次, 期望每画 1 个 group"
+            )
+        by_name[name] = g
+    return by_name
+
+
+# 保留旧 API 向后兼容 (内部不再使用, 测试可能引用)
+def pair_gold_groups(ws, groups, name_col=COL_PRODUCT_NAME):
+    """[Deprecated] 旧 2 文件 API, 保留兼容. 推荐用 index_groups_by_name."""
+    by_name = {}
+    for g in groups:
+        name = _group_base_name(ws, g, name_col)
+        by_name.setdefault(name, []).append(g)
     pairs = []
     for name in sorted(by_name.keys()):
         gs = by_name[name]
@@ -103,18 +147,12 @@ def pair_gold_groups(ws, groups, name_col=COL_PRODUCT_NAME):
     return pairs
 
 
-def _copy_row_data(src_ws, src_row, dst_ws, dst_row, max_col):
-    for c in range(1, max_col + 1):
-        dst_ws.cell(row=dst_row, column=c).value = src_ws.cell(row=src_row, column=c).value
-
-
 def _snapshot_row(ws, row, max_col):
     """快照一行数据, 返回 {col: value} dict (避免 ws 后续修改污染)."""
     return {c: ws.cell(row=row, column=c).value for c in range(1, max_col + 1)}
 
 
 def _write_row(dst_ws, dst_row, snapshot, max_col):
-    """把快照写回一行."""
     for c in range(1, max_col + 1):
         dst_ws.cell(row=dst_row, column=c).value = snapshot.get(c)
 
@@ -154,54 +192,59 @@ def _fill_meta_columns(ws, rows, col_map):
 
 def merge_one_painting(
     main_snapshots,
-    gold_pair,
+    wood_group,
+    gold_group,
     output_start_row,
     output_ws,
     col_map,
-    gold_wood_ws=None,
-    gold_gold_ws=None,
+    wood_ws=None,
+    gold_ws=None,
     max_col=None,
     ratio_type="3:2",
 ):
     """合并 1 画到 21 行结构.
 
     Args:
-        main_snapshots: 11 元素 list, 每个元素是 {col: value} dict (main group 行的快照)
-                       必须在 merge_files 入口对 main_groups 全部行做一次性快照,
-                       否则 main_ws 后续被覆盖会污染后续 group 的源数据.
-        gold_pair: (wood_group_6行, gold_group_6行) - 来源 ws
+        main_snapshots: 11 元素 list (main group 行的快照, 必须提前快照避免被覆盖)
+        wood_group: 木框文件的 6 行 group (来源 wood_ws)
+        gold_group: 金框文件的 6 行 group (来源 gold_ws)
         output_start_row: 写到 output_ws 的起始行
         output_ws: 目标 worksheet
         col_map: 目标 ws 的列映射
-        max_col: 列数, 需 main/gold/output ws 中最大值
+        wood_ws: 木框文件 worksheet (用于读 wood_group 数据)
+        gold_ws: 金框文件 worksheet (用于读 gold_group 数据)
+        max_col: 列数
     """
-    wood_group, gold_group = gold_pair
     assert len(main_snapshots) == MAIN_GROUP_SIZE
-    assert len(wood_group) == GOLD_GROUP_SIZE
-    assert len(gold_group) == GOLD_GROUP_SIZE
+    assert len(wood_group) == VARIANT_GROUP_SIZE
+    assert len(gold_group) == VARIANT_GROUP_SIZE
 
     if max_col is None:
         max_col = output_ws.max_column
 
-    wood_snapshots = [_snapshot_row(gold_wood_ws, r, max_col) for r in wood_group]
-    gold_snapshots = [_snapshot_row(gold_gold_ws, r, max_col) for r in gold_group]
+    wood_snapshots = [_snapshot_row(wood_ws, r, max_col) for r in wood_group]
+    gold_snapshots = [_snapshot_row(gold_ws, r, max_col) for r in gold_group]
 
     merged_rows = []
 
+    # parent (来自 main)
     parent_row = output_start_row
     _write_row(output_ws, parent_row, main_snapshots[0], max_col)
     merged_rows.append(parent_row)
 
+    # main children: Frame×5 + Unframe×5 → output rows 1-10
     for i, snap in enumerate(main_snapshots[1:]):
         dst = output_start_row + 1 + i
         _write_row(output_ws, dst, snap, max_col)
         merged_rows.append(dst)
 
+    # wood children: 5 → output rows 11-15
     for i, snap in enumerate(wood_snapshots[1:]):
         dst = output_start_row + 11 + i
         _write_row(output_ws, dst, snap, max_col)
         merged_rows.append(dst)
 
+    # gold children: 5 → output rows 16-20
     for i, snap in enumerate(gold_snapshots[1:]):
         dst = output_start_row + 16 + i
         _write_row(output_ws, dst, snap, max_col)
@@ -274,81 +317,106 @@ def fill_list_price_synced(ws, rows, col_map):
 
 def merge_files(
     main_path,
+    wood_path,
     gold_path,
     shop,
     date,
     theme="",
     output_path=None,
 ):
+    """三文件合并主入口.
+
+    Args:
+        main_path: 普文件 (11 行/组, Frame+Unframe)
+        wood_path: 木框文件 (6 行/组, 每画 1 个 group)
+        gold_path: 金框文件 (6 行/组, 每画 1 个 group)
+        shop: 店铺缩写
+        date: 日期
+        theme: 主题缩写 (可空)
+        output_path: 输出路径 (默认: {main_stem}_processed.xlsm)
+
+    Returns:
+        实际输出文件路径
+    """
     main_path = Path(main_path)
+    wood_path = Path(wood_path)
     gold_path = Path(gold_path)
     prefix = build_sku_prefix(shop, date, theme)
-    logger.info("合并开始: main=%s, gold=%s, prefix=%s",
-                main_path.name, gold_path.name, prefix)
+    logger.info("合并开始: main=%s, wood=%s, gold=%s, prefix=%s",
+                main_path.name, wood_path.name, gold_path.name, prefix)
 
     main_wb, main_ws, main_sheet = load_workbook(main_path)
+    wood_wb, wood_ws, _ = load_workbook(wood_path)
     gold_wb, gold_ws, _ = load_workbook(gold_path)
 
     main_groups = group_rows(main_ws, group_size=MAIN_GROUP_SIZE)
-    gold_groups = group_rows(gold_ws, group_size=GOLD_GROUP_SIZE)
+    wood_groups = group_rows(wood_ws, group_size=VARIANT_GROUP_SIZE)
+    gold_groups = group_rows(gold_ws, group_size=VARIANT_GROUP_SIZE)
 
-    is_main, _ = identify_main_file(main_groups)
-    _, is_gold = identify_main_file(gold_groups)
-    if not (is_main and is_gold):
+    main_role, _ = identify_file_role(main_groups)
+    wood_role, _ = identify_file_role(wood_groups)
+    gold_role, _ = identify_file_role(gold_groups)
+    if main_role != "main":
         raise ValueError(
-            f"文件类型识别失败: main={len(main_groups[0]) if main_groups else 0}行/组, "
-            f"gold={len(gold_groups[0]) if gold_groups else 0}行/组. "
-            f"期望 main=11, gold=6."
+            f"主文件类型错误: {main_path.name} 是 {main_role}, 期望 main (11 行/组)"
+        )
+    if wood_role != "variant":
+        raise ValueError(
+            f"木框文件类型错误: {wood_path.name} 是 {wood_role}, 期望 variant (6 行/组)"
+        )
+    if gold_role != "variant":
+        raise ValueError(
+            f"金框文件类型错误: {gold_path.name} 是 {gold_role}, 期望 variant (6 行/组)"
         )
 
-    gold_pairs = pair_gold_groups(gold_ws, gold_groups)
+    main_by_name = index_groups_by_name(main_ws, main_groups)
+    wood_by_name = index_groups_by_name(wood_ws, wood_groups)
+    gold_by_name = index_groups_by_name(gold_ws, gold_groups)
 
-    main_by_name = {}
-    for g in main_groups:
-        main_by_name[_group_base_name(main_ws, g)] = g
-    gold_by_name = {}
-    for w, g in gold_pairs:
-        gold_by_name[_group_base_name(gold_ws, w)] = (w, g)
-
-    common_names = sorted(set(main_by_name.keys()) & set(gold_by_name.keys()))
-    only_main = set(main_by_name.keys()) - set(gold_by_name.keys())
+    only_main = set(main_by_name.keys()) - set(wood_by_name.keys()) - set(gold_by_name.keys())
+    only_wood = set(wood_by_name.keys()) - set(main_by_name.keys())
     only_gold = set(gold_by_name.keys()) - set(main_by_name.keys())
     if only_main:
-        logger.warning("普独有 base: %s", only_main)
+        logger.warning("普独有 base (无木/金配对): %s", only_main)
+    if only_wood:
+        logger.warning("木独有 base (无普配对): %s", only_wood)
     if only_gold:
-        logger.warning("金独有 base: %s", only_gold)
+        logger.warning("金独有 base (无普配对): %s", only_gold)
 
-    # 不需要清空 main 原数据: merge_one_painting 会覆盖原 11 行
-    # (parent + main children 写到 output_start_row..+10)
     col_map = locate_columns(main_ws)
 
-    new_groups = []
-    out_row = DATA_START_ROW
-    # 关键: 在循环之前一次性快照所有 main 行, 避免后续 group 的写入污染源数据
-    max_col_for_snapshot = max(main_ws.max_column, gold_ws.max_column)
+    # 关键: 在合并前一次性快照所有 main 行 + 提前算 base name
+    max_col_for_snapshot = max(main_ws.max_column, wood_ws.max_column, gold_ws.max_column)
     main_all_snapshots = {
         r: _snapshot_row(main_ws, r, max_col_for_snapshot)
         for g in main_groups
         for r in g
     }
-    # 提前算 base name (此时 main_ws 还没被合并覆盖)
     main_base_names = {id(g): _group_base_name(main_ws, g) for g in main_groups}
-    # 按 main_groups 原顺序遍历 (普文件原顺序就是最终顺序, 不按字母)
+
+    new_groups = []
+    out_row = DATA_START_ROW
+    # 按 main_groups 原顺序遍历 (普文件原顺序就是最终顺序)
     for main_g in main_groups:
         name = main_base_names[id(main_g)]
-        if name not in gold_by_name:
-            logger.warning("跳过 main group (无 gold 配对): %s", name)
+        if name not in wood_by_name:
+            logger.warning("跳过 main group (无木框配对): %s", name)
             continue
-        wood_g, gold_g = gold_by_name[name]
+        if name not in gold_by_name:
+            logger.warning("跳过 main group (无金框配对): %s", name)
+            continue
+        wood_g = wood_by_name[name]
+        gold_g = gold_by_name[name]
         main_snapshots = [main_all_snapshots[r] for r in main_g]
         merged = merge_one_painting(
             main_snapshots=main_snapshots,
-            gold_pair=(wood_g, gold_g),
+            wood_group=wood_g,
+            gold_group=gold_g,
             output_start_row=out_row,
             output_ws=main_ws,
             col_map=col_map,
-            gold_wood_ws=gold_ws,
-            gold_gold_ws=gold_ws,
+            wood_ws=wood_ws,
+            gold_ws=gold_ws,
             max_col=max_col_for_snapshot,
         )
         new_groups.append(merged)

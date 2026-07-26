@@ -4,7 +4,7 @@
 
 支持两种模式：
 - **单文件模式**：1 个 Excel 走 11 行/组规范化处理
-- **两文件合并模式**：把"普文件"（11 行/组，Frame+Unframe）和"被合并文件"（6 行/组×2/画，木框+金框）合并为 21 行/组的输出文件
+- **三文件合并模式**：把"普文件"（11 行/组，Frame+Unframe）+"木框文件"+"金框文件"（各 6 行/组）合并为 21 行/组的输出文件
 
 ## 直接使用（无需安装开发环境）
 
@@ -27,19 +27,23 @@
 ### 单文件模式
 把单个 `.xlsm` 文件拖到程序上即可。处理完成后输出 `{原文件名}_processed.xlsm`，在同一目录下。
 
-### 两文件合并模式
+### 三文件合并模式
 
-适用于"多种框型合并到一个 listing"的场景，例如：
-- **普文件**：包含 `Frame-style` + `Unframe-style` 两种框型
-- **被合并文件（金）**：包含 `Vintage Wood Grain Frame-style`（木框）和 `Vintage Ornate Gold Frame-style`（金框）两种框型
+适用于"多种框型合并到一个 listing"的场景。**用户在 GUI 中按 [主/木/金] 顺序指定 3 个文件**，避免金文件内部 Wood/Gold 顺序混淆：
+- **普文件（主）**：11 行/组，含 `Frame-style` + `Unframe-style` 两种框型
+- **木框文件**：6 行/组，每画 1 个 group，对应 `Vintage Wood Grain Frame-style`
+- **金框文件**：6 行/组，每画 1 个 group，对应 `Vintage Ornate Gold Frame-style`
 - **输出**：21 行/组（1 parent + 4 style × 5 size）= Frame×5 + Unframe×5 + Wood×5 + Gold×5
+
+> **为什么要拆 3 个文件？** 金/木文件内部的所有字段（Frame Type / Frame Material / Color / Theme）都相同，无法从字段区分哪组是 Wood 哪组是 Gold。拆成 2 个独立文件后由用户在 GUI 中明确指定，最可靠。
 
 #### 步骤
 1. 双击运行 `.exe` / 程序
-2. 选 `2) 两文件合并`
-3. 依次输入（或拖入）2 个文件路径：
-   - 普文件（主文件，必须含 Frame-style + Unframe-style 两种 style）
-   - 被合并文件（每画 2 个 group，第 1 次=木框，第 2 次=金框）
+2. 选 `2) 三文件合并 (普 + 木 + 金)`
+3. 按提示依次输入（或拖入）3 个文件路径：
+   - 普文件（主文件，必须含 Frame-style + Unframe-style）
+   - 木框文件（每画 1 个 group）
+   - 金框文件（每画 1 个 group）
 4. 按提示输入 SKU 前缀的 3 部分：
    - **店铺缩写**（如 `HM`）
    - **日期**（如 `725`）
@@ -48,8 +52,8 @@
 
 #### 合并规则
 - **识别**：
-  - 11 行/组的文件 = 普文件
-  - 6 行/组的文件 = 被合并文件
+  - 11 行/组的文件 = 普文件（主）
+  - 6 行/组的文件 = 木框或金框（由用户在 GUI 指定顺序）
 - **配对**：按归一化后的 Product Name base name 配对（去 `-数字`、去 Frame-/Unframe-、替换 `-` 为空格、转小写）
 - **输出顺序**：Frame-style → Unframe-style → Vintage Wood Grain Frame-style → Vintage Ornate Gold Frame-style
 - **SKU 重写**：从 `{店铺缩写}{日期}{主题缩写}-1` 开始连续编号（如 `HM725-1`、`HM725-2`、...、`HM725-84`），每画 21 个 SKU
@@ -65,6 +69,7 @@
   - Wood：26.9 / 39.9 / 59.9 / 99.9 / 129.9
   - Gold：26.9 / 39.9 / 59.9 / 99.9 / 129.9
 - **Size / Size Map / Length / Width / Weight**：金框和木框的与 Frame×5 完全一致
+- **Image URL**：Wood 行用木框文件的图片，Gold 行用金框文件的图片（来自对应输入文件）
 
 ## 打包（开发者）
 
@@ -92,7 +97,8 @@ poetry run excel-process 你的文件.xlsm -v          # 详细日志
 poetry run excel-process 你的文件.xlsm -o 输出.xlsm # 指定输出路径
 
 # 两文件合并模式 (交互式, 程序会询问店铺缩写/日期/主题)
-poetry run python -m amazon_excel_processor.gui_entry 普文件.xlsm 被合并文件.xlsm
+# 顺序: 普文件 木框文件 金框文件
+poetry run python -m amazon_excel_processor.gui_entry 普文件.xlsm 木框文件.xlsm 金框文件.xlsm
 ```
 
 ## 处理内容

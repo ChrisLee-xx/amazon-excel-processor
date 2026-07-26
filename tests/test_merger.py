@@ -1,4 +1,4 @@
-"""合并模块测试 (TDD)"""
+"""合并模块测试 (3 文件 API: 主+木+金)"""
 
 import random
 import pytest
@@ -7,20 +7,23 @@ from openpyxl import Workbook, load_workbook
 from amazon_excel_processor.excel_io import DATA_START_ROW, HEADER_ROW, group_rows
 from amazon_excel_processor.name_normalizer import VARIANT_LABELS_21
 from amazon_excel_processor.merger import (
-    identify_main_file,
-    pair_gold_groups,
+    identify_file_role,
+    identify_main_file,  # 向后兼容
+    index_groups_by_name,
     merge_one_painting,
     rewrite_sku,
     write_parent_sku_formulas,
     fill_list_price_synced,
     build_sku_prefix,
+    MAIN_GROUP_SIZE,
+    VARIANT_GROUP_SIZE,
 )
 
 
 # ===== 测试夹具 =====
 
 def _create_main_workbook(paintings):
-    """模拟"普文件": N 画各 11 行. 返回 (wb, col_map)."""
+    """模拟"普文件": N 画各 11 行 (1 parent + 5 Frame + 5 Unframe). 返回 (wb, col_map)."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Template"
@@ -51,131 +54,141 @@ def _create_main_workbook(paintings):
     return wb, col_map
 
 
-def _create_gold_workbook(paintings, shuffled=False):
-    """模拟"金文件": N 画各 2 个 6 行 group (Wood + Gold).
+def _create_variant_workbook(paintings, role="wood", shuffled=False):
+    """模拟"木框/金框文件": N 画各 1 个 6 行 group.
 
-    parent 行 Product Name 不带 style 关键字 (实际金文件就是这样).
-    区分 Wood/Gold 靠出现顺序.
+    parent 行 Product Name 不带 style 关键字 (与真实文件一致).
+    children 用 {role} 后缀区分 (便于测试时验证来源).
     """
     wb = Workbook()
     ws = wb.active
     ws.title = "Template"
     for c, h in {2: "Seller SKU", 9: "Product Name"}.items():
         ws.cell(row=HEADER_ROW, column=c).value = h
-    pairs = []
-    for p in paintings:
-        pairs.append((p, "Wood"))
-        pairs.append((p, "Gold"))
+    items = list(paintings)
     if shuffled:
         random.seed(42)
-        random.shuffle(pairs)
+        random.shuffle(items)
     row = DATA_START_ROW
-    for title, style in pairs:
-        # parent 行: 真实金文件不带 style 关键字, 只用 base name
+    for title in items:
         ws.cell(row=row, column=9).value = title
-        ws.cell(row=row, column=2).value = f"GOLD-{row}"
+        ws.cell(row=row, column=2).value = f"{role.upper()}-{row}"
         row += 1
-        # children: 用 style 后缀区分
         for i in range(5):
-            ws.cell(row=row, column=9).value = f"{title} {style} size-{i}"
-            ws.cell(row=row, column=2).value = f"GOLD-{row}"
+            ws.cell(row=row, column=9).value = f"{title} {role} size-{i}"
+            ws.cell(row=row, column=2).value = f"{role.upper()}-{row}"
             row += 1
     return wb
 
 
-# ===== identify_main_file =====
+# ===== identify_file_role =====
 
-class TestIdentifyMainFile:
+class TestIdentifyFileRole:
     def test_11_rows_is_main(self):
-        wb, col_map = _create_main_workbook(["A", "B"])
-        groups = group_rows(wb.active, group_size=11)
+        wb, _ = _create_main_workbook(["A", "B"])
+        groups = group_rows(wb.active, group_size=MAIN_GROUP_SIZE)
+        role, _ = identify_file_role(groups)
+        assert role == "main"
+
+    def test_6_rows_is_variant(self):
+        wb = _create_variant_workbook(["A", "B"], role="wood")
+        groups = group_rows(wb.active, group_size=VARIANT_GROUP_SIZE)
+        role, _ = identify_file_role(groups)
+        assert role == "variant"
+
+    def test_backward_compat_identify_main_file(self):
+        """旧 API identify_main_file 仍可用"""
+        wb, _ = _create_main_workbook(["A"])
+        groups = group_rows(wb.active, group_size=MAIN_GROUP_SIZE)
         is_main, is_gold = identify_main_file(groups)
         assert is_main is True
         assert is_gold is False
 
-    def test_6_rows_is_gold(self):
-        wb = _create_gold_workbook(["A", "B"])
-        groups = group_rows(wb.active, group_size=6)
-        is_main, is_gold = identify_main_file(groups)
-        assert is_main is False
-        assert is_gold is True
 
+# ===== index_groups_by_name =====
 
-# ===== pair_gold_groups =====
-
-class TestPairGoldGroups:
-    def test_pairs_8_groups_into_4(self):
-        wb = _create_gold_workbook(["Art A", "Art B", "Art C", "Art D"])
+class TestIndexGroupsByName:
+    def test_index_4_paintings(self):
+        wb = _create_variant_workbook(["Art A", "Art B", "Art C", "Art D"], role="wood")
         ws = wb.active
-        groups = group_rows(ws, group_size=6)
-        pairs = pair_gold_groups(ws, groups)
-        assert len(pairs) == 4
-        for w, g in pairs:
-            assert len(w) == 6 and len(g) == 6
-            # 同 base name
-            wn = ws.cell(row=w[0], column=9).value
-            gn = ws.cell(row=g[0], column=9).value
-            assert wn == gn
+        groups = group_rows(ws, group_size=VARIANT_GROUP_SIZE)
+        by_name = index_groups_by_name(ws, groups)
+        assert len(by_name) == 4
 
-    def test_shuffled_still_pairs(self):
-        wb = _create_gold_workbook(["A", "B", "C", "D"], shuffled=True)
+    def test_duplicate_raises(self):
+        """同 base name 出现 2 次应报错"""
+        wb = _create_variant_workbook(["Art A", "Art A"], role="wood")
         ws = wb.active
-        groups = group_rows(ws, group_size=6)
-        pairs = pair_gold_groups(ws, groups)
-        assert len(pairs) == 4
+        groups = group_rows(ws, group_size=VARIANT_GROUP_SIZE)
+        with pytest.raises(ValueError, match="出现多次"):
+            index_groups_by_name(ws, groups)
 
 
 # ===== merge_one_painting =====
 
+def _setup_merge_one_painting(painting="Art A"):
+    """构造单画的 main + wood + gold 测试数据, 返回所需参数."""
+    main_wb, main_col_map = _create_main_workbook([painting])
+    main_ws = main_wb.active
+    main_groups = group_rows(main_ws, group_size=MAIN_GROUP_SIZE)
+
+    wood_ws = _create_variant_workbook([painting], role="wood").active
+    wood_groups = group_rows(wood_ws, group_size=VARIANT_GROUP_SIZE)
+
+    gold_ws = _create_variant_workbook([painting], role="gold").active
+    gold_groups = group_rows(gold_ws, group_size=VARIANT_GROUP_SIZE)
+
+    max_col = max(main_ws.max_column, wood_ws.max_column, gold_ws.max_column)
+    main_snapshots = [
+        {c: main_ws.cell(row=r, column=c).value for c in range(1, max_col + 1)}
+        for r in main_groups[0]
+    ]
+    return {
+        "main_ws": main_ws,
+        "main_col_map": main_col_map,
+        "main_snapshots": main_snapshots,
+        "wood_group": wood_groups[0],
+        "gold_group": gold_groups[0],
+        "wood_ws": wood_ws,
+        "gold_ws": gold_ws,
+        "max_col": max_col,
+    }
+
+
 class TestMergeOnePainting:
     def test_output_21_rows(self):
-        main_wb, main_col_map = _create_main_workbook(["Art A"])
-        main_ws = main_wb.active
-        main_groups = group_rows(main_ws, group_size=11)
-        gold_ws = _create_gold_workbook(["Art A"]).active
-        gold_groups = group_rows(gold_ws, group_size=6)
-        gold_pairs = pair_gold_groups(gold_ws, gold_groups)
-        # 快照 main group
-        max_col = max(main_ws.max_column, gold_ws.max_column)
-        main_snapshots = [{c: main_ws.cell(row=r, column=c).value for c in range(1, max_col+1)} for r in main_groups[0]]
+        s = _setup_merge_one_painting()
         merged = merge_one_painting(
-            main_snapshots=main_snapshots,
-            gold_pair=gold_pairs[0],
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
             output_start_row=4,
-            output_ws=main_ws,
-            col_map=main_col_map,
-            gold_wood_ws=gold_ws,
-            gold_gold_ws=gold_ws,
-            max_col=max_col,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
         )
         assert len(merged) == 21
         assert merged[0] == 4
         assert merged[-1] == 24
 
     def test_output_color_sequence(self):
-        main_wb, main_col_map = _create_main_workbook(["Art A"])
-        main_ws = main_wb.active
-        main_groups = group_rows(main_ws, group_size=11)
-        gold_ws = _create_gold_workbook(["Art A"]).active
-        gold_groups = group_rows(gold_ws, group_size=6)
-        gold_pairs = pair_gold_groups(gold_ws, gold_groups)
-        # 快照 main group
-        max_col = max(main_ws.max_column, gold_ws.max_column)
-        main_snapshots = [{c: main_ws.cell(row=r, column=c).value for c in range(1, max_col+1)} for r in main_groups[0]]
+        s = _setup_merge_one_painting()
         merged = merge_one_painting(
-            main_snapshots=main_snapshots,
-            gold_pair=gold_pairs[0],
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
             output_start_row=4,
-            output_ws=main_ws,
-            col_map=main_col_map,
-            gold_wood_ws=gold_ws,
-            gold_gold_ws=gold_ws,
-            max_col=max_col,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
         )
-        colors = [main_ws.cell(row=r, column=38).value for r in merged]
-        # merged[0]=r4 (parent), merged[1-5]=Frame×5, merged[6-10]=Unframe×5,
-        # merged[11-15]=Wood×5, merged[16-20]=Gold×5
-        assert colors[0] in (None, "")  # parent
+        colors = [s["main_ws"].cell(row=r, column=38).value for r in merged]
+        # merged[0]=r4 parent, [1-5]=Frame, [6-10]=Unframe, [11-15]=Wood, [16-20]=Gold
+        assert colors[0] in (None, "")
         assert colors[1] == "Frame-style"
         assert colors[5] == "Frame-style"
         assert colors[6] == "Unframe-style"
@@ -186,60 +199,76 @@ class TestMergeOnePainting:
         assert colors[20] == "Vintage Ornate Gold Frame-style"
 
     def test_wood_gold_match_frame_size(self):
-        main_wb, main_col_map = _create_main_workbook(["Art A"])
-        main_ws = main_wb.active
-        main_groups = group_rows(main_ws, group_size=11)
-        gold_ws = _create_gold_workbook(["Art A"]).active
-        gold_groups = group_rows(gold_ws, group_size=6)
-        gold_pairs = pair_gold_groups(gold_ws, gold_groups)
-        # 快照 main group
-        max_col = max(main_ws.max_column, gold_ws.max_column)
-        main_snapshots = [{c: main_ws.cell(row=r, column=c).value for c in range(1, max_col+1)} for r in main_groups[0]]
+        s = _setup_merge_one_painting()
         merged = merge_one_painting(
-            main_snapshots=main_snapshots,
-            gold_pair=gold_pairs[0],
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
             output_start_row=4,
-            output_ws=main_ws,
-            col_map=main_col_map,
-            gold_wood_ws=gold_ws,
-            gold_gold_ws=gold_ws,
-            max_col=max_col,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
         )
         # Frame r5-r9, Wood r15-r19, Gold r20-r24
         for rf, rw, rg in [(5, 15, 20), (6, 16, 21), (7, 17, 22), (8, 18, 23), (9, 19, 24)]:
-            assert main_ws.cell(row=rf, column=41).value == main_ws.cell(row=rw, column=41).value
-            assert main_ws.cell(row=rf, column=41).value == main_ws.cell(row=rg, column=41).value
-            assert main_ws.cell(row=rf, column=55).value == main_ws.cell(row=rw, column=55).value
-            assert main_ws.cell(row=rf, column=62).value == main_ws.cell(row=rw, column=62).value
-            assert main_ws.cell(row=rf, column=63).value == main_ws.cell(row=rw, column=63).value
-            assert main_ws.cell(row=rf, column=69).value == main_ws.cell(row=rw, column=69).value
-            assert main_ws.cell(row=rf, column=69).value == main_ws.cell(row=rg, column=69).value
+            ws = s["main_ws"]
+            assert ws.cell(row=rf, column=41).value == ws.cell(row=rw, column=41).value
+            assert ws.cell(row=rf, column=41).value == ws.cell(row=rg, column=41).value
+            assert ws.cell(row=rf, column=55).value == ws.cell(row=rw, column=55).value
+            assert ws.cell(row=rf, column=62).value == ws.cell(row=rw, column=62).value
+            assert ws.cell(row=rf, column=63).value == ws.cell(row=rw, column=63).value
+            assert ws.cell(row=rf, column=69).value == ws.cell(row=rw, column=69).value
+            assert ws.cell(row=rf, column=69).value == ws.cell(row=rg, column=69).value
 
     def test_parentage_relationship_type(self):
-        main_wb, main_col_map = _create_main_workbook(["Art A"])
-        main_ws = main_wb.active
-        main_groups = group_rows(main_ws, group_size=11)
-        gold_ws = _create_gold_workbook(["Art A"]).active
-        gold_groups = group_rows(gold_ws, group_size=6)
-        gold_pairs = pair_gold_groups(gold_ws, gold_groups)
-        # 快照 main group
-        max_col = max(main_ws.max_column, gold_ws.max_column)
-        main_snapshots = [{c: main_ws.cell(row=r, column=c).value for c in range(1, max_col+1)} for r in main_groups[0]]
-        merged = merge_one_painting(
-            main_snapshots=main_snapshots,
-            gold_pair=gold_pairs[0],
+        s = _setup_merge_one_painting()
+        merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
             output_start_row=4,
-            output_ws=main_ws,
-            col_map=main_col_map,
-            gold_wood_ws=gold_ws,
-            gold_gold_ws=gold_ws,
-            max_col=max_col,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
         )
-        assert main_ws.cell(row=4, column=30).value == "Parent"
-        assert main_ws.cell(row=5, column=30).value == "Child"
-        assert main_ws.cell(row=24, column=30).value == "Child"
-        assert main_ws.cell(row=4, column=24).value in (None, "")
-        assert main_ws.cell(row=5, column=24).value == "Variation"
+        ws = s["main_ws"]
+        assert ws.cell(row=4, column=30).value == "Parent"
+        assert ws.cell(row=5, column=30).value == "Child"
+        assert ws.cell(row=24, column=30).value == "Child"
+        assert ws.cell(row=4, column=24).value in (None, "")
+        assert ws.cell(row=5, column=24).value == "Variation"
+
+    def test_wood_image_from_wood_file(self):
+        """Wood 行的 Image URL 必须来自 wood 文件, Gold 行的来自 gold 文件.
+
+        这是 3 文件方案的核心: 用户在 GUI 中明确指定 wood/gold, 不再依赖出现顺序.
+        """
+        s = _setup_merge_one_painting()
+        merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
+            output_start_row=4,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
+        )
+        ws = s["main_ws"]
+        # Wood r15 (第 1 个 wood child) 的 SKU 应来自 wood 文件
+        # 测试夹具里 wood SKU 是 "WOOD-{row}", gold SKU 是 "GOLD-{row}"
+        # 但 merge_one_painting 后 SKU 没被重写 (rewrite_sku 是单独步骤)
+        # 所以 r15 col2 应该是 wood 文件第 1 个 child 的 SKU
+        wood_child_sku = ws.cell(row=15, column=2).value
+        gold_child_sku = ws.cell(row=20, column=2).value
+        # wood 文件第 1 个 group 的第 1 个 child 是 r5 (parent r4, child r5-r9)
+        assert wood_child_sku == "WOOD-5"
+        assert gold_child_sku == "GOLD-5"
 
 
 # ===== rewrite_sku =====
@@ -312,9 +341,8 @@ class TestFillListPriceSynced:
         ws.cell(row=HEADER_ROW, column=13).value = "Your Price"
         rows = [4, 5]
         ws.cell(row=5, column=13).value = 19.9
-        # 无 List Price 列
         fill_list_price_synced(ws, rows, col_map={"Your Price": 13})
-        assert ws.cell(row=5, column=13).value == 19.9  # 不影响
+        assert ws.cell(row=5, column=13).value == 19.9
 
 
 # ===== build_sku_prefix =====
@@ -324,7 +352,6 @@ class TestBuildSkuPrefix:
         assert build_sku_prefix("HM", "725", "AB") == "HM725AB"
 
     def test_empty_theme(self):
-        """主题缩写在 3 部分模式下允许为空字符串"""
         assert build_sku_prefix("HM", "725", "") == "HM725"
 
     def test_strip_whitespace(self):

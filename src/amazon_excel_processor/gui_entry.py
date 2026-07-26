@@ -2,11 +2,11 @@
 
 模式:
   1) 单文件处理 — 单个 .xlsm/.xlsx 走原 normalize + fill 流程
-  2) 两文件合并 — 普文件 + 被合并文件(金), 输出 21 行/组 的新文件
+  2) 三文件合并 — 普文件(主) + 木框文件 + 金框文件, 输出 21 行/组 的新文件
 
 CLI 行为:
   - 1 个参数 → 单文件模式
-  - 2 个参数 → 合并模式
+  - 3 个参数 → 合并模式 (顺序: 主 木 金)
   - 0 个参数 → 交互菜单
 """
 
@@ -115,7 +115,8 @@ def _run_single(input_path: Path, flog: logging.Logger):
     log("=" * 50)
 
 
-def _run_merge(main_path: Path, gold_path: Path, flog: logging.Logger):
+def _run_merge(main_path: Path, wood_path: Path, gold_path: Path, flog: logging.Logger):
+    """三文件合并流程 (主/木/金)"""
     from amazon_excel_processor.merger import merge_files
 
     def log(msg: str):
@@ -124,10 +125,11 @@ def _run_merge(main_path: Path, gold_path: Path, flog: logging.Logger):
 
     log("")
     log("=" * 50)
-    log("  两文件合并模式")
+    log("  三文件合并模式")
     log("=" * 50)
-    log(f"  普文件:     {main_path}")
-    log(f"  被合并文件: {gold_path}")
+    log(f"  普文件 (主): {main_path}")
+    log(f"  木框文件:    {wood_path}")
+    log(f"  金框文件:    {gold_path}")
     log("")
 
     log("请输入 SKU 前缀的 3 个部分 (店铺缩写+日期+主题缩写):")
@@ -140,6 +142,7 @@ def _run_merge(main_path: Path, gold_path: Path, flog: logging.Logger):
     log(">> 开始合并 ...")
     output_path = merge_files(
         main_path=main_path,
+        wood_path=wood_path,
         gold_path=gold_path,
         shop=shop,
         date=date,
@@ -157,7 +160,7 @@ def _run_merge(main_path: Path, gold_path: Path, flog: logging.Logger):
 
 def main():
     parser = argparse.ArgumentParser(description=f"亚马逊 Excel 模板批量处理工具 v{VERSION}")
-    parser.add_argument("files", nargs="*", help="1 个=单文件, 2 个=合并")
+    parser.add_argument("files", nargs="*", help="1 个=单文件, 3 个=合并 (主 木 金)")
     parser.add_argument("--mode", choices=["single", "merge"], help="强制模式 (默认按文件数自动)")
     args = parser.parse_args()
 
@@ -170,7 +173,7 @@ def main():
             print()
             print("  请选择模式:")
             print("    1) 单文件处理")
-            print("    2) 两文件合并")
+            print("    2) 三文件合并 (普 + 木 + 金)")
             print()
             choice = _prompt_choice("  输入 [1/2]: ", ["1", "2"])
 
@@ -194,38 +197,42 @@ def main():
                 pause_exit(0)
             else:
                 print()
-                print("  请依次输入 2 个文件路径:")
-                raw1 = _prompt_path("  普文件 (主文件) 路径: ")
-                raw2 = _prompt_path("  被合并文件路径: ")
-                if not raw1 or not raw2:
-                    print("必须输入 2 个文件路径")
+                print("  请依次输入 3 个文件路径 (顺序: 普文件 / 木框 / 金框):")
+                raw_main = _prompt_path("  1. 普文件 (主文件, 含 Frame+Unframe): ")
+                raw_wood = _prompt_path("  2. 木框文件 (Vintage Wood Grain): ")
+                raw_gold = _prompt_path("  3. 金框文件 (Vintage Ornate Gold): ")
+                if not (raw_main and raw_wood and raw_gold):
+                    print("必须输入 3 个文件路径")
                     pause_exit(1)
-                p1, p2 = Path(raw1), Path(raw2)
-                for pp in (p1, p2):
+                p_main = Path(raw_main)
+                p_wood = Path(raw_wood)
+                p_gold = Path(raw_gold)
+                for pp in (p_main, p_wood, p_gold):
                     if not pp.exists():
                         print(f"ERROR: 文件不存在: {pp}")
                         pause_exit(1)
-                flog = _setup_file_logger(p1.parent)
+                flog = _setup_file_logger(p_main.parent)
                 flog.info("版本: %s, 模式: merge", VERSION)
-                _run_merge(p1, p2, flog)
+                _run_merge(p_main, p_wood, p_gold, flog)
                 pause_exit(0)
         else:
-            if args.mode == "merge" or (args.mode is None and len(args.files) == 2):
-                if len(args.files) != 2:
-                    print("ERROR: 合并模式需要 2 个文件")
+            if args.mode == "merge" or (args.mode is None and len(args.files) == 3):
+                if len(args.files) != 3:
+                    print("ERROR: 合并模式需要 3 个文件 (主 木 金)")
                     sys.exit(1)
-                p1 = Path(_clean_path(args.files[0]))
-                p2 = Path(_clean_path(args.files[1]))
-                for pp in (p1, p2):
+                p_main = Path(_clean_path(args.files[0]))
+                p_wood = Path(_clean_path(args.files[1]))
+                p_gold = Path(_clean_path(args.files[2]))
+                for pp in (p_main, p_wood, p_gold):
                     if not pp.exists():
                         print(f"ERROR: 文件不存在: {pp}")
                         sys.exit(1)
-                flog = _setup_file_logger(p1.parent)
+                flog = _setup_file_logger(p_main.parent)
                 flog.info("版本: %s, 模式: merge (CLI)", VERSION)
-                _run_merge(p1, p2, flog)
+                _run_merge(p_main, p_wood, p_gold, flog)
             else:
                 if len(args.files) != 1:
-                    print("ERROR: 单文件模式只接受 1 个文件 (或用 --mode merge)")
+                    print("ERROR: 单文件模式只接受 1 个文件 (合并模式需要 3 个: 主 木 金)")
                     sys.exit(1)
                 p = Path(_clean_path(args.files[0]))
                 if not p.exists():
