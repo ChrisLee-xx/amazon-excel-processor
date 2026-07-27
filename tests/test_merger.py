@@ -115,13 +115,13 @@ class TestIndexGroupsByName:
         by_name = index_groups_by_name(ws, groups)
         assert len(by_name) == 4
 
-    def test_duplicate_raises(self):
-        """同 base name 出现 2 次应报错"""
+    def test_duplicate_raises_with_product_name(self):
+        """同 base name 出现 2 次应报错, 给出具体 Product Name"""
         wb = _create_variant_workbook(["Art A", "Art A"], role="wood")
         ws = wb.active
         groups = group_rows(ws, group_size=VARIANT_GROUP_SIZE)
-        with pytest.raises(ValueError, match="出现多次"):
-            index_groups_by_name(ws, groups)
+        with pytest.raises(ValueError, match="同名产品重复"):
+            index_groups_by_name(ws, groups, file_label="木框文件")
 
 
 # ===== merge_one_painting =====

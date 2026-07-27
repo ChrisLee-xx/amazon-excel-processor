@@ -96,16 +96,41 @@ def identify_main_file(groups):
 
 
 def _normalize_name_for_compare(name):
+    """归一化 Product Name 用于 base name 配对.
+
+    处理常见差异:
+    - 去 Frame-/Unframe- 之后的内容
+    - 去 -1, -2 等数字后缀
+    - 去文件扩展名 (.jpg, .png 等)
+    - 去括号及内容 (如 (1), (copy))
+    - 去所有标点符号 (只保留字母、数字、中文、空格)
+    - 合并空格、转小写
+    """
     if not name:
         return ""
     s = str(name)
     s = extract_base_title(s)
     s = remove_numeric_suffix(s)
-    # 主文件有 "Henri Matisse - Harmony in Red" 格式, 木/金文件无 "-".
-    # 配对前统一替换 "- " (连字符+空格) 为单空格.
-    s = re.sub(r"\s*-\s*", " ", s)
+    # 去文件扩展名
+    s = re.sub(r"\.(jpg|jpeg|png|gif|bmp|webp|tiff?)\b", "", s, flags=re.IGNORECASE)
+    # 去括号及内容
+    s = re.sub(r"\([^)]*\)", "", s)
+    # 去所有非字母数字中文空格字符 (标点符号等)
+    s = re.sub(r"[^a-z0-9\u4e00-\u9fff\s]", " ", s.lower())
     s = re.sub(r"\s+", " ", s).strip()
-    return s.lower()
+    return s
+
+
+def _find_close_matches(target, candidates, cutoff=0.6):
+    """用 difflib 找最接近的候选, 返回 [(name, ratio), ...]."""
+    from difflib import SequenceMatcher
+    scored = []
+    for c in candidates:
+        ratio = SequenceMatcher(None, target, c).ratio()
+        if ratio >= cutoff:
+            scored.append((c, ratio))
+    scored.sort(key=lambda x: -x[1])
+    return scored
 
 
 def _group_base_name(ws, group, name_col=COL_PRODUCT_NAME):
@@ -114,17 +139,25 @@ def _group_base_name(ws, group, name_col=COL_PRODUCT_NAME):
     return _normalize_name_for_compare(str(v) if v else "")
 
 
-def index_groups_by_name(ws, groups, name_col=COL_PRODUCT_NAME):
+def index_groups_by_name(ws, groups, name_col=COL_PRODUCT_NAME, file_label=""):
     """把 groups 按 base name 索引, 返回 {base_name: group}.
 
     要求每个 base name 只出现 1 次 (每画 1 个 group).
+    重复时报错, 给出具体 Product Name 和行号.
     """
     by_name = {}
+    label_prefix = f"[{file_label}] " if file_label else ""
     for g in groups:
         name = _group_base_name(ws, g, name_col)
         if name in by_name:
+            prev_g = by_name[name]
+            raw_name = ws.cell(row=g[0], column=name_col).value
+            prev_raw = ws.cell(row=prev_g[0], column=name_col).value
             raise ValueError(
-                f"base name '{name}' 在文件中出现多次, 期望每画 1 个 group"
+                f"{label_prefix}检测到同名产品重复:\n"
+                f"  Product Name: {raw_name}\n"
+                f"  重复位置: 行 {prev_g[0]} 和 行 {g[0]}\n"
+                f"  请检查 Excel 文件, 确保每个产品名只出现 1 次"
             )
         by_name[name] = g
     return by_name
@@ -563,19 +596,13 @@ def merge_files(
             f"金框文件类型错误: {gold_path.name} 是 {gold_role}, 期望 variant (6 行/组)"
         )
 
-    main_by_name = index_groups_by_name(main_ws, main_groups)
-    wood_by_name = index_groups_by_name(wood_ws, wood_groups)
-    gold_by_name = index_groups_by_name(gold_ws, gold_groups)
+    main_by_name = index_groups_by_name(main_ws, main_groups, file_label="普文件")
+    wood_by_name = index_groups_by_name(wood_ws, wood_groups, file_label="木框文件")
+    gold_by_name = index_groups_by_name(gold_ws, gold_groups, file_label="金框文件")
 
-    only_main = set(main_by_name.keys()) - set(wood_by_name.keys()) - set(gold_by_name.keys())
-    only_wood = set(wood_by_name.keys()) - set(main_by_name.keys())
-    only_gold = set(gold_by_name.keys()) - set(main_by_name.keys())
-    if only_main:
-        logger.warning("普独有 base (无木/金配对): %s", only_main)
-    if only_wood:
-        logger.warning("木独有 base (无普配对): %s", only_wood)
-    if only_gold:
-        logger.warning("金独有 base (无普配对): %s", only_gold)
+    # 检查配对完整性, 配不上时报错并给出模糊匹配候选
+    _check_pairing(main_by_name, wood_by_name, gold_by_name,
+                   main_ws, wood_ws, gold_ws)
 
     col_map = locate_columns(main_ws)
 
@@ -628,3 +655,65 @@ def merge_files(
     )
     logger.info("合并完成: 输出 %s, %d 画 × 21 行", out, len(new_groups))
     return out
+
+
+def _get_raw_name(ws, group, name_col):
+    """获取 group parent 行的原始 Product Name."""
+    v = ws.cell(row=group[0], column=name_col).value
+    return str(v) if v else ""
+
+
+def _check_pairing(main_by_name, wood_by_name, gold_by_name,
+                   main_ws, wood_ws, gold_ws):
+    """检查普/木/金文件的 base name 配对完整性.
+
+    配不上时用模糊匹配找候选, 报错时列出最接近的候选和相似度.
+    不自动配对 (避免配错), 只给用户参考信息.
+    """
+    main_keys = set(main_by_name.keys())
+    wood_keys = set(wood_by_name.keys())
+    gold_keys = set(gold_by_name.keys())
+
+    main_no_wood = main_keys - wood_keys
+    main_no_gold = main_keys - gold_keys
+
+    if not main_no_wood and not main_no_gold:
+        return  # 全部配对成功
+
+    errors = []
+    for name in sorted(main_no_wood):
+        main_raw = _get_raw_name(main_ws, main_by_name[name], COL_PRODUCT_NAME)
+        wood_candidates = _find_close_matches(name, list(wood_keys))
+        msg = f"  普文件产品找不到木框配对:\n"
+        msg += f"    普文件 Product Name: {main_raw}\n"
+        msg += f"    (归一化后: '{name}')\n"
+        if wood_candidates:
+            msg += f"    最接近的木框候选:\n"
+            for cname, ratio in wood_candidates[:3]:
+                wood_raw = _get_raw_name(wood_ws, wood_by_name[cname], COL_PRODUCT_NAME)
+                msg += f"      [{ratio:.0%}] {wood_raw}\n"
+        else:
+            msg += f"    木框文件中无相似产品\n"
+        errors.append(msg)
+
+    for name in sorted(main_no_gold):
+        main_raw = _get_raw_name(main_ws, main_by_name[name], COL_PRODUCT_NAME)
+        gold_candidates = _find_close_matches(name, list(gold_keys))
+        msg = f"  普文件产品找不到金框配对:\n"
+        msg += f"    普文件 Product Name: {main_raw}\n"
+        msg += f"    (归一化后: '{name}')\n"
+        if gold_candidates:
+            msg += f"    最接近的金框候选:\n"
+            for cname, ratio in gold_candidates[:3]:
+                gold_raw = _get_raw_name(gold_ws, gold_by_name[cname], COL_PRODUCT_NAME)
+                msg += f"      [{ratio:.0%}] {gold_raw}\n"
+        else:
+            msg += f"    金框文件中无相似产品\n"
+        errors.append(msg)
+
+    raise ValueError(
+        "产品配对失败, 以下普文件产品在木/金文件中找不到匹配:\n\n"
+        + "\n".join(errors)
+        + "\n请检查 Product Name 是否一致 (允许标点/扩展名/括号差异), "
+        "或手动修改后重试"
+    )

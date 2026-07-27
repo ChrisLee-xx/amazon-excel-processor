@@ -174,6 +174,7 @@ def main():
     parser.add_argument("files", nargs="*", help="1 个=单文件, 3 个=合并 (主 木 金)")
     parser.add_argument("--mode", choices=["single", "merge"], help="强制模式 (默认按文件数自动)")
     args = parser.parse_args()
+    interactive = not args.files  # 无命令行参数 = 交互式 GUI 模式
 
     flog = None
     try:
@@ -255,15 +256,27 @@ def main():
                 flog = _setup_file_logger(p.parent)
                 flog.info("版本: %s, 模式: single (CLI)", VERSION)
                 _run_single(p, flog)
-    except Exception as e:
+    except ValueError as e:
+        # 业务错误 (如同名产品重复, 文件类型不符): 给用户清晰提示, traceback 只进 log
         if flog:
-            flog.exception("处理失败")
+            flog.exception("处理失败 (ValueError)")
+        print(f"\n[ERROR] {e}")
+        if flog:
+            print(f"\n详细日志已保存到: {flog.handlers[0].baseFilename}")
+        if interactive:
+            pause_exit(1)
+        sys.exit(1)
+    except Exception as e:
+        # 未预期错误: 用户看简短信息, traceback 进 log
+        if flog:
+            flog.exception("处理失败 (未预期错误)")
         print(f"\n[ERROR] 处理失败: {e}")
-        traceback.print_exc()
         if flog:
             print(f"\n详细日志已保存到: {flog.handlers[0].baseFilename}")
         else:
             print("\n(无日志)")
+        if interactive:
+            pause_exit(1)
         sys.exit(1)
 
 
