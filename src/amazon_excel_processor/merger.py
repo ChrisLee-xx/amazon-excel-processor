@@ -140,27 +140,17 @@ def _group_base_name(ws, group, name_col=COL_PRODUCT_NAME):
 
 
 def index_groups_by_name(ws, groups, name_col=COL_PRODUCT_NAME, file_label=""):
-    """把 groups 按 base name 索引, 返回 {base_name: group}.
+    """把 groups 按 base name 索引, 返回 {base_name: [group, ...]}.
 
-    要求每个 base name 只出现 1 次 (每画 1 个 group).
-    重复时报错, 给出具体 Product Name 和行号.
+    同名产品允许出现多次 (按文件中的出现顺序排列).
+    配对时用 pair_counter 按顺序匹配 (普第 N 次 ↔ 木第 N 次 ↔ 金第 N 次).
     """
-    by_name = {}
-    label_prefix = f"[{file_label}] " if file_label else ""
+    from collections import defaultdict
+    by_name = defaultdict(list)
     for g in groups:
         name = _group_base_name(ws, g, name_col)
-        if name in by_name:
-            prev_g = by_name[name]
-            raw_name = ws.cell(row=g[0], column=name_col).value
-            prev_raw = ws.cell(row=prev_g[0], column=name_col).value
-            raise ValueError(
-                f"{label_prefix}检测到同名产品重复:\n"
-                f"  Product Name: {raw_name}\n"
-                f"  重复位置: 行 {prev_g[0]} 和 行 {g[0]}\n"
-                f"  请检查 Excel 文件, 确保每个产品名只出现 1 次"
-            )
-        by_name[name] = g
-    return by_name
+        by_name[name].append(g)
+    return dict(by_name)
 
 
 # 保留旧 API 向后兼容 (内部不再使用, 测试可能引用)
@@ -615,19 +605,26 @@ def merge_files(
     }
     main_base_names = {id(g): _group_base_name(main_ws, g) for g in main_groups}
 
+    # 追踪每个 base name 已配对次数 (支持同名多 group 按顺序配对)
+    # 普/木/金文件的产品顺序一致, 同名产品按出现顺序配对
+    pair_counter = {}
+    skipped = []  # 记录配不上的 main group
+
     new_groups = []
     out_row = DATA_START_ROW
-    # 按 main_groups 原顺序遍历 (普文件原顺序就是最终顺序)
     for main_g in main_groups:
         name = main_base_names[id(main_g)]
-        if name not in wood_by_name:
-            logger.warning("跳过 main group (无木框配对): %s", name)
+        idx = pair_counter.get(name, 0)
+        pair_counter[name] = idx + 1
+
+        wood_list = wood_by_name.get(name, [])
+        gold_list = gold_by_name.get(name, [])
+        if idx >= len(wood_list) or idx >= len(gold_list):
+            main_raw = _get_raw_name(main_ws, main_g, COL_PRODUCT_NAME)
+            skipped.append((name, main_raw, idx, len(wood_list), len(gold_list)))
             continue
-        if name not in gold_by_name:
-            logger.warning("跳过 main group (无金框配对): %s", name)
-            continue
-        wood_g = wood_by_name[name]
-        gold_g = gold_by_name[name]
+        wood_g = wood_list[idx]
+        gold_g = gold_list[idx]
         main_snapshots = [main_all_snapshots[r] for r in main_g]
         merged = merge_one_painting(
             main_snapshots=main_snapshots,
@@ -643,6 +640,10 @@ def merge_files(
         )
         new_groups.append(merged)
         out_row += MERGED_GROUP_SIZE
+
+    # 配不上的报错 (用模糊匹配给候选)
+    if skipped:
+        _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws)
 
     rewrite_sku(main_ws, new_groups, prefix, mode=mode)
     write_parent_sku_formulas(main_ws, new_groups, mode=mode)
@@ -665,54 +666,42 @@ def _get_raw_name(ws, group, name_col):
 
 def _check_pairing(main_by_name, wood_by_name, gold_by_name,
                    main_ws, wood_ws, gold_ws):
-    """检查普/木/金文件的 base name 配对完整性.
+    """预检查: 普文件的 base name 是否都能在木/金文件中找到 (允许同名多 group).
 
-    配不上时用模糊匹配找候选, 报错时列出最接近的候选和相似度.
-    不自动配对 (避免配错), 只给用户参考信息.
+    只在 base name 完全不存在时才警告 (不是每次配对都检查).
+    同名多 group 的按顺序配对在 merge_files 主循环中处理.
     """
-    main_keys = set(main_by_name.keys())
-    wood_keys = set(wood_by_name.keys())
-    gold_keys = set(gold_by_name.keys())
+    # 此函数保留为 no-op, 实际配对检查在 merge_files 主循环中通过 pair_counter 处理
+    pass
 
-    main_no_wood = main_keys - wood_keys
-    main_no_gold = main_keys - gold_keys
 
-    if not main_no_wood and not main_no_gold:
-        return  # 全部配对成功
-
+def _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws):
+    """配不上时用模糊匹配找候选, 报错列出."""
     errors = []
-    for name in sorted(main_no_wood):
-        main_raw = _get_raw_name(main_ws, main_by_name[name], COL_PRODUCT_NAME)
-        wood_candidates = _find_close_matches(name, list(wood_keys))
-        msg = f"  普文件产品找不到木框配对:\n"
-        msg += f"    普文件 Product Name: {main_raw}\n"
-        msg += f"    (归一化后: '{name}')\n"
+    for name, main_raw, idx, wood_count, gold_count in skipped:
+        msg = f"  普文件产品找不到配对:\n"
+        msg += f"    Product Name: {main_raw}\n"
+        msg += f"    (归一化后: '{name}', 第 {idx+1} 次出现)\n"
+        msg += f"    木框文件中该名 {wood_count} 个, 金框文件中该名 {gold_count} 个\n"
+        # 模糊匹配给候选
+        all_wood_keys = list(wood_by_name.keys())
+        all_gold_keys = list(gold_by_name.keys())
+        wood_candidates = _find_close_matches(name, all_wood_keys)
+        gold_candidates = _find_close_matches(name, all_gold_keys)
         if wood_candidates:
             msg += f"    最接近的木框候选:\n"
             for cname, ratio in wood_candidates[:3]:
-                wood_raw = _get_raw_name(wood_ws, wood_by_name[cname], COL_PRODUCT_NAME)
+                wood_raw = _get_raw_name(wood_ws, wood_by_name[cname][0], COL_PRODUCT_NAME)
                 msg += f"      [{ratio:.0%}] {wood_raw}\n"
-        else:
-            msg += f"    木框文件中无相似产品\n"
-        errors.append(msg)
-
-    for name in sorted(main_no_gold):
-        main_raw = _get_raw_name(main_ws, main_by_name[name], COL_PRODUCT_NAME)
-        gold_candidates = _find_close_matches(name, list(gold_keys))
-        msg = f"  普文件产品找不到金框配对:\n"
-        msg += f"    普文件 Product Name: {main_raw}\n"
-        msg += f"    (归一化后: '{name}')\n"
         if gold_candidates:
             msg += f"    最接近的金框候选:\n"
             for cname, ratio in gold_candidates[:3]:
-                gold_raw = _get_raw_name(gold_ws, gold_by_name[cname], COL_PRODUCT_NAME)
+                gold_raw = _get_raw_name(gold_ws, gold_by_name[cname][0], COL_PRODUCT_NAME)
                 msg += f"      [{ratio:.0%}] {gold_raw}\n"
-        else:
-            msg += f"    金框文件中无相似产品\n"
         errors.append(msg)
 
     raise ValueError(
-        "产品配对失败, 以下普文件产品在木/金文件中找不到匹配:\n\n"
+        f"产品配对失败, {len(skipped)} 个普文件产品在木/金文件中找不到匹配:\n\n"
         + "\n".join(errors)
         + "\n请检查 Product Name 是否一致 (允许标点/扩展名/括号差异), "
         "或手动修改后重试"
