@@ -115,21 +115,26 @@ def _run_single(input_path: Path, flog: logging.Logger):
     log("=" * 50)
 
 
-def _run_merge(main_path: Path, wood_path: Path, gold_path: Path, flog: logging.Logger):
-    """三文件合并流程 (主/木/金)"""
+def _run_merge(main_path: Path, wood_path, gold_path, flog: logging.Logger):
+    """合并流程 (主必填, 木/金可选)。
+
+    wood_path / gold_path 可为 Path 或 None (None 表示该文件未提供)。
+    """
     from amazon_excel_processor.merger import merge_files
 
     def log(msg: str):
         print(msg, flush=True)
         flog.info(msg.strip())
 
+    wood_disp = wood_path if wood_path else "(未提供, 跳过)"
+    gold_disp = gold_path if gold_path else "(未提供, 跳过)"
     log("")
     log("=" * 50)
-    log("  三文件合并模式")
+    log("  合并模式 (木/金可选)")
     log("=" * 50)
     log(f"  普文件 (主): {main_path}")
-    log(f"  木框文件:    {wood_path}")
-    log(f"  金框文件:    {gold_path}")
+    log(f"  木框文件:    {wood_disp}")
+    log(f"  金框文件:    {gold_disp}")
     log("")
 
     # 第 1 步: 选择上架类型
@@ -141,6 +146,11 @@ def _run_merge(main_path: Path, wood_path: Path, gold_path: Path, flog: logging.
     mode_label = "新品上架" if mode == "new" else "老品补充变体"
     log(f"  → {mode_label}")
     log("")
+
+    # 老品补充变体必须有变体文件
+    if mode == "old_variant" and not (wood_path or gold_path):
+        print("ERROR: 老品补充变体模式需要至少一个木框或金框文件")
+        pause_exit(1)
 
     # 第 2 步: 输入 SKU 前缀
     log("请输入 SKU 命名 (推荐格式: 店铺名+日期+主题, 如 HM725):")
@@ -171,8 +181,11 @@ def _run_merge(main_path: Path, wood_path: Path, gold_path: Path, flog: logging.
 
 def main():
     parser = argparse.ArgumentParser(description=f"亚马逊 Excel 模板批量处理工具 v{VERSION}")
-    parser.add_argument("files", nargs="*", help="1 个=单文件, 3 个=合并 (主 木 金)")
+    parser.add_argument("files", nargs="*",
+                        help="1 个=单文件; 3 个=合并 (主 木 金); 木/金可选时用 1 个普文件 + --wood/--gold")
     parser.add_argument("--mode", choices=["single", "merge"], help="强制模式 (默认按文件数自动)")
+    parser.add_argument("--wood", help="木框文件路径 (合并模式, 可选)")
+    parser.add_argument("--gold", help="金框文件路径 (合并模式, 可选)")
     args = parser.parse_args()
     interactive = not args.files  # 无命令行参数 = 交互式 GUI 模式
 
@@ -209,42 +222,61 @@ def main():
                 pause_exit(0)
             else:
                 print()
-                print("  请依次输入 3 个文件路径 (顺序: 普文件 / 木框 / 金框):")
+                print("  请依次输入文件路径 (普文件必填, 木框/金框可留空跳过):")
                 raw_main = _prompt_path("  1. 普文件 (主文件, 含 Frame+Unframe): ")
-                raw_wood = _prompt_path("  2. 木框文件 (Vintage Wood Grain): ")
-                raw_gold = _prompt_path("  3. 金框文件 (Vintage Ornate Gold): ")
-                if not (raw_main and raw_wood and raw_gold):
-                    print("必须输入 3 个文件路径")
+                if not raw_main:
+                    print("必须输入普文件路径")
                     pause_exit(1)
+                raw_wood = _prompt_path("  2. 木框文件 (Vintage Wood Grain, 留空跳过): ")
+                raw_gold = _prompt_path("  3. 金框文件 (Vintage Ornate Gold, 留空跳过): ")
                 p_main = Path(raw_main)
-                p_wood = Path(raw_wood)
-                p_gold = Path(raw_gold)
+                p_wood = Path(raw_wood) if raw_wood else None
+                p_gold = Path(raw_gold) if raw_gold else None
                 for pp in (p_main, p_wood, p_gold):
-                    if not pp.exists():
+                    if pp is not None and not pp.exists():
                         print(f"ERROR: 文件不存在: {pp}")
                         pause_exit(1)
                 flog = _setup_file_logger(p_main.parent)
-                flog.info("版本: %s, 模式: merge", VERSION)
+                flog.info("版本: %s, 模式: merge (wood=%s, gold=%s)", VERSION,
+                          bool(p_wood), bool(p_gold))
                 _run_merge(p_main, p_wood, p_gold, flog)
                 pause_exit(0)
         else:
-            if args.mode == "merge" or (args.mode is None and len(args.files) == 3):
-                if len(args.files) != 3:
-                    print("ERROR: 合并模式需要 3 个文件 (主 木 金)")
+            # CLI 模式
+            has_wood_flag = bool(args.wood)
+            has_gold_flag = bool(args.gold)
+            # 判定合并模式: 强制 merge / 3 位置文件 / 带 --wood 或 --gold
+            is_merge = (args.mode == "merge"
+                        or len(args.files) == 3
+                        or has_wood_flag or has_gold_flag)
+            if args.mode == "single":
+                is_merge = False
+            if is_merge:
+                if len(args.files) == 3:
+                    p_main = Path(_clean_path(args.files[0]))
+                    p_wood = Path(_clean_path(args.files[1]))
+                    p_gold = Path(_clean_path(args.files[2]))
+                    if has_wood_flag or has_gold_flag:
+                        print("提示: 已提供 3 个位置文件, 忽略 --wood/--gold")
+                elif len(args.files) == 1:
+                    p_main = Path(_clean_path(args.files[0]))
+                    p_wood = Path(_clean_path(args.wood)) if has_wood_flag else None
+                    p_gold = Path(_clean_path(args.gold)) if has_gold_flag else None
+                else:
+                    print("ERROR: 合并模式需要 1 个普文件 (可用 --wood/--gold 补充木/金) 或 3 个文件 (主 木 金)")
+                    print("       2 个位置文件无法区分木/金, 请用 --wood / --gold 分别指定")
                     sys.exit(1)
-                p_main = Path(_clean_path(args.files[0]))
-                p_wood = Path(_clean_path(args.files[1]))
-                p_gold = Path(_clean_path(args.files[2]))
                 for pp in (p_main, p_wood, p_gold):
-                    if not pp.exists():
+                    if pp is not None and not pp.exists():
                         print(f"ERROR: 文件不存在: {pp}")
                         sys.exit(1)
                 flog = _setup_file_logger(p_main.parent)
-                flog.info("版本: %s, 模式: merge (CLI)", VERSION)
+                flog.info("版本: %s, 模式: merge (CLI, wood=%s, gold=%s)", VERSION,
+                          bool(p_wood), bool(p_gold))
                 _run_merge(p_main, p_wood, p_gold, flog)
             else:
                 if len(args.files) != 1:
-                    print("ERROR: 单文件模式只接受 1 个文件 (合并模式需要 3 个: 主 木 金)")
+                    print("ERROR: 单文件模式只接受 1 个文件 (合并: 3 个文件 或 1 个普文件 + --wood/--gold)")
                     sys.exit(1)
                 p = Path(_clean_path(args.files[0]))
                 if not p.exists():

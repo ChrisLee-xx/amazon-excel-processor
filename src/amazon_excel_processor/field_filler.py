@@ -101,6 +101,91 @@ PRICE_SEQUENCE_21 = [
 # 这里直接指向 PRICE_SEQUENCE_21, merger 阶段可共用
 
 
+# ===== 动态 style 计划 (木/金可选) =====
+# Frame+Unframe 永远来自普文件 (固定 11 行); Wood/Gold 按需追加在后面。
+# 每个 style 的 5 尺寸字段值从 STYLE_SPECS 拼接出逐行序列再填充。
+# 当 active_styles=[frame,unframe,wood,gold] 时, 动态序列与上面 *_21 常量逐元素相等。
+
+# 所有 style 共享的 5 尺寸值 (3:2)
+_STYLE_SIZE_MAP = ["X-Small", "Small", "Medium", "Large", "X-Large"]
+_STYLE_SIZE_32 = ["12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''"]
+_STYLE_LENGTH = [20, 30, 40, 50, 60]
+_STYLE_WIDTH = [30, 45, 60, 75, 90]
+_STYLE_EDGE = [12, 18, 24, 30, 36]
+
+STYLE_SPECS = {
+    "frame": {
+        "label": "Frame-style",
+        "weight": [0.18, 0.28, 0.48, 0.68, 0.88],
+        "price": [19.9, 29.9, 45, 75, 99],
+    },
+    "unframe": {
+        "label": "Unframe-style",
+        "weight": [0.02, 0.04, 0.07, 0.15, 0.25],
+        "price": [11.9, 14.9, 19.9, 24.9, 34.9],
+    },
+    "wood": {
+        "label": "Vintage Wood Grain Frame-style",
+        "weight": [0.18, 0.28, 0.48, 0.68, 0.88],
+        "price": [26.9, 39.9, 59.9, 99.9, 129.9],
+    },
+    "gold": {
+        "label": "Vintage Ornate Gold Frame-style",
+        "weight": [0.18, 0.28, 0.48, 0.68, 0.88],
+        "price": [26.9, 39.9, 59.9, 99.9, 129.9],
+    },
+}
+
+# 永远来自普文件的 style (固定前 10 个 child)
+MAIN_STYLES = ["frame", "unframe"]
+# 可选变体 style (按输出顺序追加)
+VARIANT_STYLES = ["wood", "gold"]
+
+
+def build_active_styles(has_wood: bool, has_gold: bool) -> list:
+    """返回合并输出的 style 顺序 (frame, unframe 总在, wood/gold 按需)."""
+    styles = list(MAIN_STYLES)
+    if has_wood:
+        styles.append("wood")
+    if has_gold:
+        styles.append("gold")
+    return styles
+
+
+def _build_sequences(active_styles: list) -> dict:
+    """根据 active_styles 构建各字段的逐行序列 (含 parent 行占位).
+
+    返回 dict, 每个序列长度 = 1 + 5*len(active_styles):
+      color / size_map / size_32 / length / width / weight / price / edge / labels
+    parent 行: color="", size_map="", size_32="", length="", width="",
+              weight="", price="", edge=1, labels=None
+    """
+    seqs = {
+        "color": [""],
+        "size_map": [""],
+        "size_32": [""],
+        "length": [""],
+        "width": [""],
+        "weight": [""],
+        "price": [""],
+        "edge": [1],
+        "labels": [None],
+    }
+    for key in active_styles:
+        spec = STYLE_SPECS[key]
+        label = spec["label"]
+        seqs["color"].extend([label] * 5)
+        seqs["size_map"].extend(_STYLE_SIZE_MAP)
+        seqs["size_32"].extend(_STYLE_SIZE_32)
+        seqs["length"].extend(_STYLE_LENGTH)
+        seqs["width"].extend(_STYLE_WIDTH)
+        seqs["weight"].extend(spec["weight"])
+        seqs["price"].extend(spec["price"])
+        seqs["edge"].extend(_STYLE_EDGE)
+        seqs["labels"].extend([label] * 5)
+    return seqs
+
+
 def fill_list_price(
     ws: Worksheet,
     rows: list[int],
@@ -115,30 +200,24 @@ def fill_list_price(
         ws.cell(row=row, column=list_col).value = ws.cell(row=row, column=price_col).value
 
 
-def fill_group_21(
+def fill_group_merged(
     ws: Worksheet,
     rows: list[int],
     col_map: dict[str, int],
     ratio_type: str,
+    active_styles: list,
 ) -> None:
-    """编排 21 行合并产品组的所有字段填充。
+    """编排合并产品组的所有字段填充 (动态 style 数)。
 
-    与 fill_group() 类似, 但用 *_21 序列; 同时填 List Price。
+    active_styles 决定输出行数 (1 + 5*len(active_styles)) 和各 style 的
+    color / price / weight 等取值。ratio_type 仅影响 Size 列:
+      - "square": 跳过 Size 填充, 保留用户预填值 (与历史行为一致)
+      - "3:2": 填 size_32 序列
+    Length / Width 始终用 3:2 值 (历史行为, 不随 ratio 变)。
     """
-    fill_simple_fields_21(ws, rows, col_map)
-    fill_color_21(ws, rows, col_map)
-    fill_size_21(ws, rows, col_map, ratio_type)
-    fill_size_map_21(ws, rows, col_map)
-    fill_length_21(ws, rows, col_map, ratio_type)
-    fill_width_21(ws, rows, col_map, ratio_type)
-    fill_weight_21(ws, rows, col_map)
-    fill_price_21(ws, rows, col_map)
-    fill_list_price(ws, rows, col_map)
-    clean_search_terms(ws, rows, col_map)
-    fill_item_length_longer_edge_21(ws, rows, col_map)
+    seqs = _build_sequences(active_styles)
 
-
-def fill_simple_fields_21(ws, rows, col_map):
+    # 简单字段 (全组相同)
     simple_fills = {
         "Variation Theme": "color-size",
         "Paint Type": "Oil",
@@ -151,74 +230,46 @@ def fill_simple_fields_21(ws, rows, col_map):
         for row in rows:
             ws.cell(row=row, column=col_idx).value = value
 
+    # 逐行序列字段
+    _fill_seq(ws, rows, col_map, "Color", seqs["color"])
+    if ratio_type != "square":
+        _fill_seq(ws, rows, col_map, "Size", seqs["size_32"])
+    _fill_seq(ws, rows, col_map, "Size Map", seqs["size_map"])
+    _fill_seq(ws, rows, col_map, "Length", seqs["length"])
+    _fill_seq(ws, rows, col_map, "Width", seqs["width"])
+    _fill_seq(ws, rows, col_map, "Weight", seqs["weight"])
+    _fill_seq(ws, rows, col_map, "Your Price", seqs["price"])
+    _fill_seq(ws, rows, col_map, "Item Length Longer Edge", seqs["edge"])
 
-def fill_color_21(ws, rows, col_map):
-    if "Color" not in col_map:
+    # List Price = Your Price (每行同步)
+    fill_list_price(ws, rows, col_map)
+
+    # Search Terms: 下划线替换为空格
+    clean_search_terms(ws, rows, col_map)
+
+
+def _fill_seq(ws, rows, col_map, field_name, sequence):
+    """按 sequence 逐行填充某列 (sequence 长度需 >= len(rows))."""
+    if field_name not in col_map:
         return
-    col_idx = col_map["Color"]
+    col_idx = col_map[field_name]
     for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = COLOR_SEQUENCE_21[i]
+        ws.cell(row=row, column=col_idx).value = sequence[i]
 
 
-def fill_size_21(ws, rows, col_map, ratio_type):
-    if "Size" not in col_map:
-        return
-    if ratio_type == "square":
-        return
-    col_idx = col_map["Size"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = SIZE_32_21[i]
+def fill_group_21(
+    ws: Worksheet,
+    rows: list[int],
+    col_map: dict[str, int],
+    ratio_type: str,
+) -> None:
+    """[向后兼容] 21 行合并产品组填充 (假设 wood+gold 都在)。
 
-
-def fill_size_map_21(ws, rows, col_map):
-    if "Size Map" not in col_map:
-        return
-    col_idx = col_map["Size Map"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = SIZE_MAP_SEQUENCE_21[i]
-
-
-def fill_length_21(ws, rows, col_map, ratio_type):
-    if "Length" not in col_map:
-        return
-    col_idx = col_map["Length"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = LENGTH_32_21[i]
-
-
-def fill_width_21(ws, rows, col_map, ratio_type):
-    if "Width" not in col_map:
-        return
-    col_idx = col_map["Width"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = WIDTH_32_21[i]
-
-
-def fill_weight_21(ws, rows, col_map):
-    if "Weight" not in col_map:
-        return
-    col_idx = col_map["Weight"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = WEIGHT_SEQUENCE_21[i]
-
-
-def fill_price_21(ws, rows, col_map):
-    if "Your Price" not in col_map:
-        return
-    col_idx = col_map["Your Price"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = PRICE_SEQUENCE_21[i]
-
-
-def fill_item_length_longer_edge_21(ws, rows, col_map):
-    """parent 行填 1, child 行按尺寸填实际英寸值 (5 种尺寸循环 4 次)。"""
-    if "Item Length Longer Edge" not in col_map:
-        return
-    col_idx = col_map["Item Length Longer Edge"]
-    # 21 元素: parent=1, 然后 [12,18,24,30,36]×4
-    values = [1] + [12, 18, 24, 30, 36] * 4
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = values[i]
+    等价于 fill_group_merged(..., active_styles=[frame,unframe,wood,gold])。
+    新代码应直接调用 fill_group_merged 并传入实际 active_styles。
+    """
+    fill_group_merged(ws, rows, col_map, ratio_type,
+                      build_active_styles(has_wood=True, has_gold=True))
 
 
 def detect_ratio_type(

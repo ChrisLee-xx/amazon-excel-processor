@@ -474,3 +474,192 @@ class TestBuildSkuPrefix:
 
     def test_complex_prefix(self):
         assert build_sku_prefix("AB2026风景") == "AB2026风景"
+
+
+# ===== 木/金可选 (动态行数 11/16/21) =====
+
+class TestOptionalVariants:
+    """木框/金框独立可选: 输出 11/16/21 行。"""
+
+    def test_wood_only_16_rows(self):
+        """只提供木框 (无金框) → 16 行, 木 color 在 index 11-15, 无金行。"""
+        s = _setup_merge_one_painting()
+        merged = merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            output_start_row=4,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_group=s["wood_group"],
+            wood_ws=s["wood_ws"],
+            gold_group=None,
+            gold_ws=None,
+            max_col=s["max_col"],
+        )
+        assert len(merged) == 16
+        assert merged[0] == 4
+        assert merged[-1] == 19
+        ws = s["main_ws"]
+        colors = [ws.cell(row=r, column=38).value for r in merged]
+        assert colors[0] in (None, "")
+        assert colors[1] == "Frame-style"
+        assert colors[10] == "Unframe-style"
+        for i in range(11, 16):
+            assert colors[i] == "Vintage Wood Grain Frame-style"
+        prices = [ws.cell(row=r, column=13).value for r in merged]
+        assert prices[11:16] == [26.9, 39.9, 59.9, 99.9, 129.9]
+
+    def test_gold_only_16_rows(self):
+        """只提供金框 (无木框) → 16 行, 金 color 紧随 main 占 index 11-15。"""
+        s = _setup_merge_one_painting()
+        merged = merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            output_start_row=4,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_group=None,
+            wood_ws=None,
+            gold_group=s["gold_group"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
+        )
+        assert len(merged) == 16
+        ws = s["main_ws"]
+        colors = [ws.cell(row=r, column=38).value for r in merged]
+        for i in range(11, 16):
+            assert colors[i] == "Vintage Ornate Gold Frame-style"
+        # 金行数据来自 gold 文件 (gold 第 1 个 child SKU = GOLD-5)
+        assert ws.cell(row=merged[11], column=2).value == "GOLD-5"
+
+    def test_main_only_new_mode_11_rows(self):
+        """无木无金, new 模式 → 11 行 (parent + Frame×5 + Unframe×5)。"""
+        s = _setup_merge_one_painting()
+        merged = merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            output_start_row=4,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_group=None,
+            wood_ws=None,
+            gold_group=None,
+            gold_ws=None,
+            max_col=s["max_col"],
+            mode="new",
+        )
+        assert len(merged) == 11
+        assert merged[-1] == 14
+
+    def test_old_variant_requires_variant(self):
+        """old_variant 模式无变体 → 报错。"""
+        s = _setup_merge_one_painting()
+        with pytest.raises(ValueError, match="至少一个木框或金框"):
+            merge_one_painting(
+                main_snapshots=s["main_snapshots"],
+                output_start_row=4,
+                output_ws=s["main_ws"],
+                col_map=s["main_col_map"],
+                wood_group=None,
+                gold_group=None,
+                mode="old_variant",
+            )
+
+    def test_old_variant_wood_only_preserves_main(self):
+        """old_variant + 只木 → main 11 行不动, 木 5 行处理, 无金行。"""
+        s = _setup_merge_one_painting()
+        main_ws = s["main_ws"]
+        main_snapshots = s["main_snapshots"]
+        original = {}
+        for i in range(11):
+            for c, v in main_snapshots[i].items():
+                original[(i, c)] = v
+        merge_one_painting(
+            main_snapshots=main_snapshots,
+            output_start_row=4,
+            output_ws=main_ws,
+            col_map=s["main_col_map"],
+            wood_group=s["wood_group"],
+            wood_ws=s["wood_ws"],
+            gold_group=None,
+            gold_ws=None,
+            max_col=s["max_col"],
+            mode="old_variant",
+        )
+        # main 11 行 (r4-r14) 完全不变
+        for i in range(11):
+            r = 4 + i
+            for c in range(1, s["max_col"] + 1):
+                orig = original[(i, c)]
+                now = main_ws.cell(row=r, column=c).value
+                orig_e = orig if orig not in (None, "") else ""
+                now_e = now if now not in (None, "") else ""
+                assert orig_e == now_e, f"r{r} col{c}: 原值={orig} 现值={now}"
+        # 木行 r15-r19
+        for i, r in enumerate(range(15, 20)):
+            assert main_ws.cell(row=r, column=38).value == "Vintage Wood Grain Frame-style"
+            assert main_ws.cell(row=r, column=13).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
+        # 无金行
+        assert main_ws.cell(row=20, column=38).value in (None, "")
+
+
+# ===== merge_files 集成 (木/金可选) =====
+
+class TestMergeFilesOptional:
+    """merge_files 端到端: 木/金可选 + 配对错误处理。"""
+
+    def test_gold_only_missing_painting_raises_cleanly(self, tmp_path):
+        """金 only 且金文件缺某画 → _raise_pairing_error 干净触发 (无 None 崩溃)。"""
+        from amazon_excel_processor.merger import merge_files
+        main_wb, _ = _create_main_workbook(["Art A", "Art B"])
+        gold_wb = _create_variant_workbook(["Art A"], role="gold")  # 缺 Art B
+        main_p = tmp_path / "main.xlsx"
+        gold_p = tmp_path / "gold.xlsx"
+        main_wb.save(str(main_p))
+        gold_wb.save(str(gold_p))
+        with pytest.raises(ValueError) as excinfo:
+            merge_files(main_path=main_p, wood_path=None, gold_path=gold_p,
+                        sku_prefix="T", mode="new")
+        msg = str(excinfo.value)
+        assert "配对失败" in msg
+        assert "未提供" in msg  # 木框未提供
+        assert "金框" in msg
+
+    def test_wood_only_merge_files_16_rows(self, tmp_path):
+        """merge_files 木 only → 输出 16 行/组, 无金行。"""
+        from amazon_excel_processor.merger import merge_files
+        from openpyxl import load_workbook as _lw
+        main_wb, _ = _create_main_workbook(["Art A"])
+        wood_wb = _create_variant_workbook(["Art A"], role="wood")
+        main_p = tmp_path / "main.xlsx"
+        wood_p = tmp_path / "wood.xlsx"
+        main_wb.save(str(main_p))
+        wood_wb.save(str(wood_p))
+        out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
+                          sku_prefix="T", mode="new")
+        ws = _lw(str(out))["Template"]
+        # parent + 10 main + 5 wood = 16 行 (r4-r19)
+        assert ws.cell(row=4, column=30).value == "Parent"
+        assert ws.cell(row=5, column=30).value == "Child"
+        assert ws.cell(row=19, column=38).value == "Vintage Wood Grain Frame-style"
+        assert ws.cell(row=20, column=38).value in (None, "")  # 无金行
+
+
+# ===== 向后兼容: 动态序列 == 21 行常量 =====
+
+class TestDynamicSequencesBackwardCompat:
+    """build_active_styles(True,True) 动态序列必须与现有 *_21 常量逐元素相等。"""
+
+    def test_sequences_match_21_constants(self):
+        from amazon_excel_processor.field_filler import (
+            build_active_styles, _build_sequences,
+            COLOR_SEQUENCE_21, SIZE_MAP_SEQUENCE_21, SIZE_32_21,
+            LENGTH_32_21, WIDTH_32_21, WEIGHT_SEQUENCE_21, PRICE_SEQUENCE_21,
+        )
+        seqs = _build_sequences(build_active_styles(True, True))
+        assert seqs["color"] == COLOR_SEQUENCE_21
+        assert seqs["size_map"] == SIZE_MAP_SEQUENCE_21
+        assert seqs["size_32"] == SIZE_32_21
+        assert seqs["length"] == LENGTH_32_21
+        assert seqs["width"] == WIDTH_32_21
+        assert seqs["weight"] == WEIGHT_SEQUENCE_21
+        assert seqs["price"] == PRICE_SEQUENCE_21
+        assert seqs["edge"] == [1] + [12, 18, 24, 30, 36] * 4
+        assert seqs["labels"][1:] == VARIANT_LABELS_21[1:]
