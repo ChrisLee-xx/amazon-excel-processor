@@ -125,43 +125,103 @@ def normalize_group(
     col_idx: int,
     ratio_type: str,
 ) -> None:
-    """对一个 11 行产品组执行 Product Name 规范化。
+    """对一个 11 行产品组执行 Item Name 规范化。
 
     按固定位置直接构造：{标题} {Frame/Unframe}-style {尺寸}
     顺序固定：第1行parent，第2-6行Frame+尺寸，第7-11行Unframe+尺寸。
     """
     sizes = SIZES_SQUARE if ratio_type == "square" else SIZES_32
 
-    # 先从 parent 行（第一行）提取基础标题
-    parent_cell = ws.cell(row=rows[0], column=col_idx)
-    parent_value = parent_cell.value
-    if parent_value is None:
+    base_title = _extract_base_from_rows(ws, rows, col_idx)
+    if base_title is None:
         return
-
-    base_title = extract_base_title(str(parent_value))
 
     for i, row in enumerate(rows):
         cell = ws.cell(row=row, column=col_idx)
-        value = cell.value
-        if value is None:
-            continue
-
         if i == 0:
-            # parent 行：只做清理，不加 Frame/Unframe
             name = base_title
         else:
-            # 变体行：按位置拼接
             label = VARIANT_LABELS[i]
             size_idx = (i - 1) % 5  # 0-4 循环
             size = sizes[size_idx]
             name = f"{base_title} {label} {size}"
+        # 新格式: 基名保留原样 (不去连字符/标点), 只合并多余空格
+        cell.value = collapse_spaces(name)
 
-        # 清理管道
-        name = collapse_spaces(name)
-        name = remove_numeric_suffix(name)
-        name = replace_hyphens(name)
-        name = replace_underscores(name)
-        name = deduplicate_words(name)
-        name = collapse_spaces(name)
 
-        cell.value = name
+def normalize_group_21(
+    ws: Worksheet,
+    rows: list[int],
+    col_idx: int,
+    ratio_type: str = "3:2",
+) -> None:
+    """对一个 21 行产品组（合并模式输出）执行 Item Name 规范化。
+
+    顺序固定：第1行parent，第2-6行Frame×5，第7-11行Unframe×5，
+    第12-16行Vintage Wood Grain×5，第17-21行Vintage Ornate Gold×5。
+    """
+    sizes = SIZES_SQUARE if ratio_type == "square" else SIZES_32
+
+    base_title = _extract_base_from_rows(ws, rows, col_idx)
+    if base_title is None:
+        return
+
+    for i, row in enumerate(rows):
+        cell = ws.cell(row=row, column=col_idx)
+        if i == 0:
+            name = base_title
+        else:
+            label = VARIANT_LABELS_21[i]
+            size_idx = (i - 1) % 5
+            size = sizes[size_idx]
+            name = f"{base_title} {label} {size}"
+        cell.value = _clean_name(name)
+
+
+def normalize_variant_group(
+    ws: Worksheet,
+    rows: list[int],
+    col_idx: int,
+    style_label: str,
+    ratio_type: str = "3:2",
+) -> None:
+    """对木/金文件的一个 6 行产品组执行 Item Name 规范化。
+
+    只给该组的变体行（rows[1:]）贴指定的 style_label + 尺寸后缀。
+    第 1 行是 parent（不贴 style）。
+    """
+    sizes = SIZES_SQUARE if ratio_type == "square" else SIZES_32
+
+    base_title = _extract_base_from_rows(ws, rows, col_idx)
+    if base_title is None:
+        return
+
+    for i, row in enumerate(rows):
+        cell = ws.cell(row=row, column=col_idx)
+        if i == 0:
+            name = base_title
+        else:
+            size_idx = (i - 1) % 5
+            size = sizes[size_idx]
+            name = f"{base_title} {style_label} {size}"
+        cell.value = _clean_name(name)
+
+
+def _extract_base_from_rows(ws, rows, col_idx):
+    """从 group 的 parent 行提取基础标题。"""
+    parent_cell = ws.cell(row=rows[0], column=col_idx)
+    parent_value = parent_cell.value
+    if parent_value is None:
+        return None
+    return extract_base_title(str(parent_value))
+
+
+def _clean_name(name: str) -> str:
+    """Item Name 清理管道。"""
+    name = collapse_spaces(name)
+    name = remove_numeric_suffix(name)
+    name = replace_hyphens(name)
+    name = replace_underscores(name)
+    name = deduplicate_words(name)
+    name = collapse_spaces(name)
+    return name

@@ -62,21 +62,28 @@ def merged_group_size(has_wood: bool, has_gold: bool) -> int:
 WOOD_STYLE = "Vintage Wood Grain Frame-style"
 GOLD_STYLE = "Vintage Ornate Gold Frame-style"
 
-COL_SELLER_SKU = 2
-COL_PRODUCT_NAME = 9
-COL_YOUR_PRICE = 13
-COL_RELATIONSHIP_TYPE = 24
-COL_PACKAGE_LEVEL = 25
-COL_VARIATION_THEME = 26
-COL_PARENT_SKU = 27
-COL_PARENTAGE = 30
-COL_COLOR = 38
-COL_SIZE = 41
-COL_SIZE_MAP = 55
-COL_LENGTH = 62
-COL_WIDTH = 63
-COL_WEIGHT = 69
-COL_LIST_PRICE = 145
+# 新格式 Item Name 的 style 标签 (与 Color 列不同!):
+# Wood 的 Item Name 带 "Vintage Ornate Gold" 前缀 (复现最终文件), 但 Color 列是干净的
+ITEM_STYLE_LABELS = {
+    "frame": "Frame-style",
+    "unframe": "Unframe-style",
+    "wood": "Vintage Ornate Gold Vintage Wood Grain Frame-style",
+    "gold": "Vintage Ornate Gold Frame-style",
+}
+
+# 新格式列号 (新格式 header row 4, data row 8)
+COL_SELLER_SKU = 1       # SKU
+COL_PRODUCT_NAME = 7     # Item Name
+COL_PARENT_SKU = 5       # Parent SKU
+COL_PARENTAGE = 4        # Parentage Level
+COL_VARIATION_THEME = 6  # Variation Theme Name
+COL_COLOR = 55           # Color
+COL_SIZE = 56            # Size
+COL_SIZE_MAP = None      # 新格式无独立 Size Map 列 (忽略)
+COL_LENGTH = 124         # Item Length Longer Edge
+COL_WIDTH = 126          # Item Width Shorter Edge
+COL_WEIGHT = 147         # Item Weight
+COL_LIST_PRICE = 154     # List Price
 
 
 def build_sku_prefix(sku):
@@ -206,25 +213,21 @@ def _col_letter(col_idx):
 def _fill_meta_columns(ws, rows, col_map):
     parent_row = rows[0]
     child_rows = rows[1:]
-    var_theme = "color-size"
-    if "Variation Theme" in col_map:
-        vt_col = col_map["Variation Theme"]
+    # 新格式: Variation Theme Name (col6) = "COLOR/SIZE", Parentage Level (col4)
+    var_theme = "COLOR/SIZE"
+    if "Variation Theme Name" in col_map:
+        vt_col = col_map["Variation Theme Name"]
         for r in rows:
             ws.cell(row=r, column=vt_col).value = var_theme
     if "Package Level" in col_map:
         pl_col = col_map["Package Level"]
         for r in rows:
             ws.cell(row=r, column=pl_col).value = "unit"
-    if "Parentage" in col_map:
-        par_col = col_map["Parentage"]
+    if "Parentage Level" in col_map:
+        par_col = col_map["Parentage Level"]
         ws.cell(row=parent_row, column=par_col).value = "Parent"
         for r in child_rows:
             ws.cell(row=r, column=par_col).value = "Child"
-    if "Relationship Type" in col_map:
-        rt_col = col_map["Relationship Type"]
-        ws.cell(row=parent_row, column=rt_col).value = None
-        for r in child_rows:
-            ws.cell(row=r, column=rt_col).value = "Variation"
 
 
 def merge_one_painting(
@@ -272,7 +275,16 @@ def merge_one_painting(
     if max_col is None:
         max_col = output_ws.max_column
 
-    active_styles = build_active_styles(has_wood, has_gold)
+    if mode == "old_parent":
+        # 老品合并: 只保留父体 + 金木变体, style 只有 wood/gold
+        variant_keys = []
+        if has_wood:
+            variant_keys.append("wood")
+        if has_gold:
+            variant_keys.append("gold")
+        active_styles = variant_keys
+    else:
+        active_styles = build_active_styles(has_wood, has_gold)
 
     merged_rows = []
 
@@ -281,14 +293,20 @@ def merge_one_painting(
     _write_row(output_ws, parent_row, main_snapshots[0], max_col)
     merged_rows.append(parent_row)
 
-    # main children: Frame×5 + Unframe×5 → output rows 1-10 (恒定 10 行)
-    for i, snap in enumerate(main_snapshots[1:]):
-        dst = output_start_row + 1 + i
-        _write_row(output_ws, dst, snap, max_col)
-        merged_rows.append(dst)
+    # 变体 children 起始偏移 (main 子体行数)
+    #   new / old_variant: main 恒占 11 行 (parent + Frame×5 + Unframe×5)
+    #   old_parent: 只保留父体, 丢弃 Frame/Unframe 子体, 变体紧跟父体
+    if mode == "old_parent":
+        # 只保留父体, 不写 main 的 Frame/Unframe 子体
+        next_offset = 1
+    else:
+        # main children: Frame×5 + Unframe×5 → output rows 1-10 (恒定 10 行)
+        for i, snap in enumerate(main_snapshots[1:]):
+            dst = output_start_row + 1 + i
+            _write_row(output_ws, dst, snap, max_col)
+            merged_rows.append(dst)
+        next_offset = 11  # main 占 11 行 (1 parent + 10 children)
 
-    # 变体 children 紧跟在 main 之后 (从 output row 11 起), 按动态紧凑偏移写入
-    next_offset = 11  # main 占 11 行 (1 parent + 10 children)
     if has_wood:
         wood_snapshots = [_snapshot_row(wood_ws, r, max_col) for r in wood_group]
         for i, snap in enumerate(wood_snapshots[1:]):
@@ -318,10 +336,36 @@ def merge_one_painting(
                                  ratio_type, variant_styles)
         _fill_variant_fields(output_ws, variant_rows, col_map, ratio_type, variant_styles)
         _fill_meta_columns_variant(output_ws, variant_rows, col_map)
+    elif mode == "old_parent":
+        # 老品合并 (只保留父体): 输出 = 父体 + 金×5 + 木×5
+        # 丢弃普的 Frame/Unframe 子体; 父体行完整保留 (含原 SKU)
+        # 变体行 (merged_rows[1:]) 做 normalize + fill + meta
+        variant_rows = merged_rows[1:]
+        variant_styles = active_styles  # 只有 wood/gold (build_active_styles 已过滤)
+        _normalize_variant_names(output_ws, merged_rows, variant_rows, COL_PRODUCT_NAME,
+                                 ratio_type, variant_styles)
+        _fill_variant_fields(output_ws, variant_rows, col_map, ratio_type, variant_styles)
+        _fill_meta_columns_variant(output_ws, variant_rows, col_map)
     else:
         raise ValueError(f"未知 mode: {mode}")
 
     return merged_rows
+
+
+def _extract_base_name_raw(name: str) -> str:
+    """从 Item Name 提取基名, 保留原样 (不去连字符/标点), 只剥离已有 style/尺寸后缀.
+
+    已知 style 标签和尺寸格式会从末尾剥离。
+    """
+    if not name:
+        return ""
+    s = str(name).strip()
+    # 剥离末尾的 style 标签 + 尺寸后缀 (如 "Vintage Ornate Gold Frame-style 08x12inch(20x30cm)")
+    # 匹配: 空格 + style 标签 + 空格 + 尺寸
+    style_alt = "|".join(re.escape(l) for l in ITEM_STYLE_LABELS.values())
+    pattern = re.compile(rf"\s+(?:{style_alt})\s+[0-9]+x[0-9]+inch\([0-9]+x[0-9]+cm\)$")
+    s = pattern.sub("", s)
+    return s.strip()
 
 
 def _normalize_variant_names(ws, all_rows, variant_rows, name_col, ratio_type="3:2",
@@ -338,14 +382,13 @@ def _normalize_variant_names(ws, all_rows, variant_rows, name_col, ratio_type="3
     parent_value = parent_cell.value
     if parent_value is None:
         return
-    base_title = extract_base_title(str(parent_value))
-    base_title = remove_numeric_suffix(base_title)
-    base_title = collapse_spaces(base_title)
+    # 基名保留原样 (不去连字符/标点), 只剥离已有 style/尺寸后缀
+    base_title = _extract_base_name_raw(str(parent_value))
 
-    # 变体 labels (不含 parent 占位): 每个 style × 5
+    # 变体 labels (不含 parent 占位): 每个 style × 5 (用 Item Name 专用标签)
     var_labels = []
     for key in variant_styles:
-        var_labels.extend([STYLE_SPECS[key]["label"]] * 5)
+        var_labels.extend([ITEM_STYLE_LABELS[key]] * 5)
 
     for i, row in enumerate(variant_rows):
         cell = ws.cell(row=row, column=name_col)
@@ -356,11 +399,6 @@ def _normalize_variant_names(ws, all_rows, variant_rows, name_col, ratio_type="3
         size_idx = i % 5
         size = sizes[size_idx]
         name = f"{base_title} {label} {size}"
-        name = collapse_spaces(name)
-        name = remove_numeric_suffix(name)
-        name = replace_hyphens(name)
-        name = replace_underscores(name)
-        name = deduplicate_words(name)
         name = collapse_spaces(name)
         cell.value = name
 
@@ -387,22 +425,15 @@ def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2", variant_st
     _set("Color", "color")
     if ratio_type != "square":
         _set("Size", "size_32")
-    _set("Size Map", "size_map")
-    _set("Length", "length")
-    _set("Width", "width")
-    _set("Weight", "weight")
-    _set("Your Price", "price")
-    _set("Item Length Longer Edge", "edge")
+    _set("Item Length Longer Edge", "length")
+    _set("Item Width Shorter Edge", "width")
+    _set("Item Weight", "weight")
+    # 新格式: List Price (col154) 就是价格列, 直接填
+    _set("List Price", "price")
+    _set("Style", "color")
 
-    # List Price = Your Price
-    if "List Price" in col_map and "Your Price" in col_map:
-        lp_col = col_map["List Price"]
-        yp_col = col_map["Your Price"]
-        for row in variant_rows:
-            ws.cell(row=row, column=lp_col).value = ws.cell(row=row, column=yp_col).value
-
-    # Variation Theme / Paint Type / Color Map
-    simple_fills = {"Variation Theme": "color-size", "Paint Type": "Oil", "Color Map": "Multi"}
+    # Variation Theme Name / Paint Type / Color Map
+    simple_fills = {"Variation Theme Name": "COLOR/SIZE", "Paint Type": "Oil", "Color Map": "Multi"}
     for field, val in simple_fills.items():
         if field in col_map:
             col = col_map[field]
@@ -419,23 +450,19 @@ def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2", variant_st
 
 
 def _fill_meta_columns_variant(ws, variant_rows, col_map):
-    """老品补充模式: 只对 Wood/Gold 行设 Parentage/Relationship Type/Variation Theme/Package Level."""
-    if "Variation Theme" in col_map:
-        col = col_map["Variation Theme"]
+    """老品补充模式: 只对变体行设 Parentage Level / Variation Theme Name / Package Level."""
+    if "Variation Theme Name" in col_map:
+        col = col_map["Variation Theme Name"]
         for r in variant_rows:
-            ws.cell(row=r, column=col).value = "color-size"
+            ws.cell(row=r, column=col).value = "COLOR/SIZE"
     if "Package Level" in col_map:
         col = col_map["Package Level"]
         for r in variant_rows:
             ws.cell(row=r, column=col).value = "unit"
-    if "Parentage" in col_map:
-        col = col_map["Parentage"]
+    if "Parentage Level" in col_map:
+        col = col_map["Parentage Level"]
         for r in variant_rows:
             ws.cell(row=r, column=col).value = "Child"
-    if "Relationship Type" in col_map:
-        col = col_map["Relationship Type"]
-        for r in variant_rows:
-            ws.cell(row=r, column=col).value = "Variation"
 
 
 def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=None):
@@ -446,15 +473,18 @@ def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=N
     """
     if active_styles is None:
         active_styles = ["frame", "unframe", "wood", "gold"]
-    labels = _build_sequences(active_styles)["labels"]
     sizes = SIZES_32
     parent_cell = ws.cell(row=rows[0], column=name_col)
     parent_value = parent_cell.value
     if parent_value is None:
         return
-    base_title = extract_base_title(str(parent_value))
-    base_title = remove_numeric_suffix(base_title)
-    base_title = collapse_spaces(base_title)
+    # 基名保留原样 (不去连字符/标点), 只剥离已有 style/尺寸后缀
+    base_title = _extract_base_name_raw(str(parent_value))
+
+    # 逐行 label: [None(parent)] + 每个 style × 5, 用 Item Name 专用标签
+    labels = [None]
+    for key in active_styles:
+        labels.extend([ITEM_STYLE_LABELS[key]] * 5)
 
     for i, row in enumerate(rows):
         cell = ws.cell(row=row, column=name_col)
@@ -468,11 +498,6 @@ def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=N
             size_idx = (i - 1) % 5
             size = sizes[size_idx]
             name = f"{base_title} {label} {size}"
-        name = collapse_spaces(name)
-        name = remove_numeric_suffix(name)
-        name = replace_hyphens(name)
-        name = replace_underscores(name)
-        name = deduplicate_words(name)
         name = collapse_spaces(name)
         cell.value = name
 
@@ -488,6 +513,7 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new"):
         mode: "new" = 新品上架 (全部 21 行 × N 画从 prefix-1 连续编号)
               "old_variant" = 老品补充变体 (普文件原 11 行 SKU 保留,
                               新增 Wood/Gold 10 行 × N 画从 prefix-1 连续编号)
+              "old_parent" = 老品合并 (父体 SKU 保留, 金木变体从 prefix-1 连续编号)
     """
     if mode == "new":
         counter = 1
@@ -496,14 +522,21 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new"):
                 ws.cell(row=row, column=sku_col).value = f"{prefix}-{counter}"
                 counter += 1
     elif mode == "old_variant":
-        # 普文件原 11 行 (group[0:11]) SKU 保留, 新增 Wood/Gold 行 (group[11:21]) 重写
+        # 老品补充变体: 普文件原 11 行 (group[0:11]) SKU 保留, 变体行 (group[11:]) 重写
         counter = 1
         for group in groups:
-            for row in group[11:]:  # Wood×5 + Gold×5 = 10 行
+            for row in group[11:]:
+                ws.cell(row=row, column=sku_col).value = f"{prefix}-{counter}"
+                counter += 1
+    elif mode == "old_parent":
+        # 老品合并: 父体 (group[0]) SKU 保留, 金木变体行 (group[1:]) 重写
+        counter = 1
+        for group in groups:
+            for row in group[1:]:
                 ws.cell(row=row, column=sku_col).value = f"{prefix}-{counter}"
                 counter += 1
     else:
-        raise ValueError(f"未知 mode: {mode}, 期望 'new' 或 'old_variant'")
+        raise ValueError(f"未知 mode: {mode}, 期望 'new'/'old_variant'/'old_parent'")
 
 
 def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_sku_col=COL_SELLER_SKU, mode="new"):
@@ -517,6 +550,8 @@ def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_
         mode: "new" = 新品上架 (全部 21 行 parent SKU 公式重写)
               "old_variant" = 老品补充变体 (普文件原 11 行保留,
                               新增 Wood/Gold 行从 =AA{prev_unframe_last} 开始链式引用)
+              "old_parent" = 老品合并 (父体 parent SKU 保留原值,
+                              金木变体直接用 =A{parent_row} 引用父体 SKU)
     """
     seller_letter = _col_letter(seller_sku_col)
     parent_sku_letter = _col_letter(parent_sku_col)
@@ -538,14 +573,20 @@ def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_
         elif mode == "old_variant":
             # 普文件原 11 行 (group[0:11]) parent SKU 公式保留
             # 新增 Wood/Gold 行 (group[11:21]) 从 =AA{group[10]} 开始链式
-            # group[10] = Unframe 最后一个, group[11] = Wood 第 1 个
             prev_row = group[10]  # Unframe 最后一个
             for i in range(11, len(group)):
                 ws.cell(row=group[i], column=parent_sku_col).value = f"={parent_sku_letter}{prev_row}"
                 prev_row = group[i]
 
+        elif mode == "old_parent":
+            # 父体 parent SKU 保留原值 (不覆盖)
+            # 金木变体直接用 =A{parent_row} 引用父体 SKU (单层, 不链式)
+            parent_row = group[0]
+            for i in range(1, len(group)):
+                ws.cell(row=group[i], column=parent_sku_col).value = f"={seller_letter}{parent_row}"
+
         else:
-            raise ValueError(f"未知 mode: {mode}, 期望 'new' 或 'old_variant'")
+            raise ValueError(f"未知 mode: {mode}, 期望 'new'/'old_variant'/'old_parent'")
 
 
 def fill_list_price_synced(ws, rows, col_map):
@@ -578,6 +619,8 @@ def merge_files(
         实际输出文件路径
     """
     main_path = Path(main_path)
+    wood_path = Path(wood_path) if wood_path is not None else None
+    gold_path = Path(gold_path) if gold_path is not None else None
     has_wood = wood_path is not None
     has_gold = gold_path is not None
     if mode == "old_variant" and not (has_wood or has_gold):
@@ -593,9 +636,9 @@ def merge_files(
     main_wb, main_ws, main_sheet = load_workbook(main_path)
     wood_ws = gold_ws = None
     if has_wood:
-        _, wood_ws, _ = load_workbook(Path(wood_path))
+        _, wood_ws, _ = load_workbook(wood_path)
     if has_gold:
-        _, gold_ws, _ = load_workbook(Path(gold_path))
+        _, gold_ws, _ = load_workbook(gold_path)
 
     main_groups = group_rows(main_ws, group_size=MAIN_GROUP_SIZE)
     wood_groups = group_rows(wood_ws, group_size=VARIANT_GROUP_SIZE) if has_wood else []
@@ -643,12 +686,22 @@ def merge_files(
     }
     main_base_names = {id(g): _group_base_name(main_ws, g) for g in main_groups}
 
-    group_size = merged_group_size(has_wood, has_gold)
+    if mode == "old_parent":
+        # 老品合并: 只保留父体 + 金木变体 (不含 Frame/Unframe)
+        group_size = 1 + 5 * (bool(has_wood) + bool(has_gold))
+    else:
+        group_size = merged_group_size(has_wood, has_gold)
 
     # 追踪每个 base name 已配对次数 (支持同名多 group 按顺序配对)
     # 普/木/金文件的产品顺序一致, 同名产品按出现顺序配对
     pair_counter = {}
     skipped = []  # 记录配不上的 main group
+
+    # 清空 main_ws 数据区 (r8 到 max_row), 排除表格底部备注行残留
+    clear_max = main_ws.max_row + 20
+    for r in range(DATA_START_ROW, clear_max + 1):
+        for c in range(1, max_col_for_snapshot + 1):
+            main_ws.cell(row=r, column=c).value = None
 
     new_groups = []
     out_row = DATA_START_ROW

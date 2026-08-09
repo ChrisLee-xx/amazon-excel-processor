@@ -1,42 +1,65 @@
 # Amazon Excel Processor
 
-亚马逊上架商品 Excel 模板批量规范化处理工具。
+亚马逊上架商品 Excel 模板批量规范化处理工具（新格式）。
 
-支持两种模式：
-- **单文件模式**：1 个 Excel 走 11 行/组规范化处理
-- **合并模式**：以"普文件"（11 行/组，Frame+Unframe）为主，"木框文件"+"金框文件"（各 6 行/组）**可选**地合并进来。木框/金框可只提供一个、都提供、或都不提供，输出 11/16/21 行/组
+## 支持的格式（新格式）
+
+新格式模板特征：
+- 列名在第 **4 行**，数据从第 **8 行** 开始
+- 关键列：`SKU`(col1)、`Parent SKU`(col5)、`Item Name`(col7)、`Color`(col55)、`Size`(col56)、`Item Weight`(col147)、`List Price`(col154)
+- Parent SKU 公式：`=A{row}`（引用父体 SKU）和 `=E{row}`（链式引用）
+
+## 功能模式
+
+### 1) 单文件处理
+1 个 Excel（11 行/组 = 1 parent + 5 Frame + 5 Unframe）规范化处理。输出 `{原文件名}_processed.xlsx`。
+
+### 2) 合并模式（木/金可选）
+以"普文件"（11 行/组，Frame+Unframe）为主，"木框文件"+"金框文件"（各 6 行/组）**可选**地合并进来。输出 11/16/21 行/组（按提供的文件数）：
+- 普 only → 11 行（Frame×5 + Unframe×5）
+- 普 + 木（或金）→ 16 行
+- 普 + 木 + 金 → 21 行（Frame×5 + Unframe×5 + Wood×5 + Gold×5）
+
+**Item Name 格式**：`{画作名} {style标签} {尺寸}`，如
+`Route 66... Decor Vintage Ornate Gold Vintage Wood Grain Frame-style 08x12inch(20x30cm)`
+
+合并时可选 3 种上架类型：
+- **新品上架**：所有 SKU 重写为 `{前缀}-1, -2, ...`，输出含普内容（Frame+Unframe+变体）
+- **老品补充变体**：普文件原 11 行保留，仅金/木 SKU 重写
+- **老品合并**：只保留父体（原 SKU），普通 Frame/Unframe 内容替换为金/木
 
 ## 直接使用（无需安装开发环境）
 
 ### Mac
 1. 从 `dist/` 目录拿到 `amazon-excel-processor` 文件
 2. 使用方式：
-   - **拖拽**：把 `.xlsm` 文件拖到 `amazon-excel-processor` 图标上（单文件模式）
-   - **双击**：双击运行后按提示选择模式 1 或 2
+   - **拖拽**：把 `.xlsx`/`.xlsm` 文件拖到图标上（单文件模式）
+   - **双击**：双击运行后按提示选择模式
 
 > 首次打开可能提示"无法验证开发者"，右键选"打开"即可。
 
 ### Windows
 1. 从 `dist/` 目录拿到 `amazon-excel-processor.exe` 文件
 2. 使用方式：
-   - **拖拽**：把 `.xlsm` 文件拖到 `.exe` 图标上
+   - **拖拽**：把 `.xlsx`/`.xlsm` 文件拖到 `.exe` 图标上
    - **双击**：双击运行后粘贴文件路径 / 选择模式
 
 ## 使用流程
 
 ### 单文件模式
-把单个 `.xlsm` 文件拖到程序上即可。处理完成后输出 `{原文件名}_processed.xlsm`，在同一目录下。
+把单个 `.xlsx`/`.xlsm` 文件拖到程序上即可。处理完成后输出 `{原文件名}_processed.xlsx`，在同一目录下。
 
 ### 合并模式（木/金可选）
 
-适用于"多种框型合并到一个 listing"的场景。**普文件必填，木框/金框可选**（可只提供一种），由用户在 GUI 中明确指定每个文件的角色，避免金文件内部 Wood/Gold 顺序混淆：
-- **普文件（主）**：11 行/组，含 `Frame-style` + `Unframe-style` 两种框型（必填）
+适用于"多种框型合并到一个 listing"的场景。**普文件必填，木框/金框可选**，由用户在 GUI 中明确指定每个文件的角色：
+- **普文件（主）**：11 行/组，含 `Frame-style` + `Unframe-style`（必填）
 - **木框文件**：6 行/组，每画 1 个 group，对应 `Vintage Wood Grain Frame-style`（可选）
 - **金框文件**：6 行/组，每画 1 个 group，对应 `Vintage Ornate Gold Frame-style`（可选）
-- **输出**：每组行数 = 1 + 5×(2 + 有木 + 有金)，即 11/16/21 行
-  - 普文件 only → 11 行（Frame×5 + Unframe×5）
-  - 普 + 木（或 普 + 金）→ 16 行（追加 1 种变体 ×5）
-  - 普 + 木 + 金 → 21 行（Frame×5 + Unframe×5 + Wood×5 + Gold×5）
+
+合并步骤：
+1. 依次输入 3 个文件路径（普必填，木/金可留空）
+2. 选择上架类型（新品上架 / 老品补充变体 / 老品合并）
+3. 输入 SKU 前缀（如 `HM725`）
 
 > **为什么要拆多个文件？** 金/木文件内部的所有字段（Frame Type / Frame Material / Color / Theme）都相同，无法从字段区分哪组是 Wood 哪组是 Gold。拆成独立文件后由用户在 GUI 中明确指定，最可靠。
 >

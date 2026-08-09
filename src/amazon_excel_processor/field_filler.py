@@ -74,17 +74,17 @@ SIZE_32_21 = [
     "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
 ]
 
-LENGTH_32_21 = [""] + [20, 30, 40, 50, 60] * 4  # parent + 4 styles × 5 sizes = 21
+LENGTH_32_21 = [""] + [12, 18, 24, 30, 36] * 4  # parent + 4 styles × 5 sizes = 21 (英寸)
 
-WIDTH_32_21 = [""] + [30, 45, 60, 75, 90] * 4
+WIDTH_32_21 = [""] + [8, 12, 16, 20, 24] * 4
 
 # Weight: parent=空, Frame 和 Wood/Gold 均为 0.18-0.88, Unframe 为 0.02-0.25
 WEIGHT_SEQUENCE_21 = [
     "",
-    0.18, 0.28, 0.48, 0.68, 0.88,  # Frame×5
-    0.02, 0.04, 0.07, 0.15, 0.25,  # Unframe×5
-    0.18, 0.28, 0.48, 0.68, 0.88,  # Wood×5 (与 Frame×5 一致)
-    0.18, 0.28, 0.48, 0.68, 0.88,  # Gold×5 (与 Frame×5 一致)
+    300, 400, 600, 1000, 1500,   # Frame×5
+    80, 90, 130, 180, 240,       # Unframe×5
+    450, 850, 1500, 2400, 3400,  # Wood×5
+    450, 850, 1500, 2400, 3400,  # Gold×5
 ]
 
 # Price: parent=空, Frame: 19.9/29.9/45/75/99, Unframe: 11.9/14.9/19.9/24.9/34.9,
@@ -106,32 +106,36 @@ PRICE_SEQUENCE_21 = [
 # 每个 style 的 5 尺寸字段值从 STYLE_SPECS 拼接出逐行序列再填充。
 # 当 active_styles=[frame,unframe,wood,gold] 时, 动态序列与上面 *_21 常量逐元素相等。
 
-# 所有 style 共享的 5 尺寸值 (3:2)
+# 所有 style 共享的 5 尺寸值 (新格式, 英寸)
 _STYLE_SIZE_MAP = ["X-Small", "Small", "Medium", "Large", "X-Large"]
 _STYLE_SIZE_32 = ["12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''"]
-_STYLE_LENGTH = [20, 30, 40, 50, 60]
-_STYLE_WIDTH = [30, 45, 60, 75, 90]
+# 新格式: Length (Item Length Longer Edge) = 英寸 [12, 18, 24, 30, 36]
+_STYLE_LENGTH = [12, 18, 24, 30, 36]
+# 新格式: Width (Item Width Shorter Edge) = 英寸 [8, 12, 16, 20, 24]
+_STYLE_WIDTH = [8, 12, 16, 20, 24]
+# edge 序列与 Length 一致 (同列 col124)
 _STYLE_EDGE = [12, 18, 24, 30, 36]
 
 STYLE_SPECS = {
     "frame": {
         "label": "Frame-style",
-        "weight": [0.18, 0.28, 0.48, 0.68, 0.88],
+        # 新格式: Item Weight 单位为 Grams (克)
+        "weight": [300, 400, 600, 1000, 1500],
         "price": [19.9, 29.9, 45, 75, 99],
     },
     "unframe": {
         "label": "Unframe-style",
-        "weight": [0.02, 0.04, 0.07, 0.15, 0.25],
+        "weight": [80, 90, 130, 180, 240],
         "price": [11.9, 14.9, 19.9, 24.9, 34.9],
     },
     "wood": {
         "label": "Vintage Wood Grain Frame-style",
-        "weight": [0.18, 0.28, 0.48, 0.68, 0.88],
+        "weight": [450, 850, 1500, 2400, 3400],
         "price": [26.9, 39.9, 59.9, 99.9, 129.9],
     },
     "gold": {
         "label": "Vintage Ornate Gold Frame-style",
-        "weight": [0.18, 0.28, 0.48, 0.68, 0.88],
+        "weight": [450, 850, 1500, 2400, 3400],
         "price": [26.9, 39.9, 59.9, 99.9, 129.9],
     },
 }
@@ -209,17 +213,18 @@ def fill_group_merged(
 ) -> None:
     """编排合并产品组的所有字段填充 (动态 style 数)。
 
-    active_styles 决定输出行数 (1 + 5*len(active_styles)) 和各 style 的
-    color / price / weight 等取值。ratio_type 仅影响 Size 列:
-      - "square": 跳过 Size 填充, 保留用户预填值 (与历史行为一致)
-      - "3:2": 填 size_32 序列
-    Length / Width 始终用 3:2 值 (历史行为, 不随 ratio 变)。
+    新格式列映射:
+      - Length 列 (Item Length Longer Edge, col124) 填英寸长度 12/18/24/30/36
+      - Width 列 (Item Width Shorter Edge, col126) 填英寸宽度 8/12/16/20/24
+      - List Price 列 (col154) 是唯一价格列, 直接填价格, 无 Your Price
+      - Weight 列 (col147) 单位克
+      - Style (col46) 填 style 标签
     """
     seqs = _build_sequences(active_styles)
 
-    # 简单字段 (全组相同)
+    # 简单字段 (全组相同): 新格式 Variation Theme Name (col6) = "COLOR/SIZE"
     simple_fills = {
-        "Variation Theme": "color-size",
+        "Variation Theme Name": "COLOR/SIZE",
         "Paint Type": "Oil",
         "Color Map": "Multi",
     }
@@ -235,17 +240,12 @@ def fill_group_merged(
     if ratio_type != "square":
         _fill_seq(ws, rows, col_map, "Size", seqs["size_32"])
     _fill_seq(ws, rows, col_map, "Size Map", seqs["size_map"])
-    _fill_seq(ws, rows, col_map, "Length", seqs["length"])
-    _fill_seq(ws, rows, col_map, "Width", seqs["width"])
-    _fill_seq(ws, rows, col_map, "Weight", seqs["weight"])
-    _fill_seq(ws, rows, col_map, "Your Price", seqs["price"])
-    _fill_seq(ws, rows, col_map, "Item Length Longer Edge", seqs["edge"])
-
-    # List Price = Your Price (每行同步)
-    fill_list_price(ws, rows, col_map)
-
-    # Search Terms: 下划线替换为空格
-    clean_search_terms(ws, rows, col_map)
+    _fill_seq(ws, rows, col_map, "Item Length Longer Edge", seqs["length"])
+    _fill_seq(ws, rows, col_map, "Item Width Shorter Edge", seqs["width"])
+    _fill_seq(ws, rows, col_map, "Item Weight", seqs["weight"])
+    # 新格式: List Price (col154) 就是价格列, 直接填价格 (无 Your Price 同步)
+    _fill_seq(ws, rows, col_map, "List Price", seqs["price"])
+    _fill_seq(ws, rows, col_map, "Style", seqs["color"])
 
 
 def _fill_seq(ws, rows, col_map, field_name, sequence):
@@ -458,14 +458,9 @@ def fill_group(
     col_map: dict[str, int],
     ratio_type: str,
 ) -> None:
-    """编排单个产品组的所有字段填充。"""
-    fill_simple_fields(ws, rows, col_map)
-    fill_color(ws, rows, col_map)
-    fill_size(ws, rows, col_map, ratio_type)
-    fill_size_map(ws, rows, col_map)
-    fill_length(ws, rows, col_map, ratio_type)
-    fill_width(ws, rows, col_map, ratio_type)
-    fill_weight(ws, rows, col_map)
-    fill_price(ws, rows, col_map)
-    clean_search_terms(ws, rows, col_map)
-    fill_item_length_longer_edge(ws, rows, col_map)
+    """编排单个产品组 (11 行, Frame+Unframe) 的所有字段填充。
+
+    新格式下等价于 fill_group_merged(active_styles=["frame","unframe"])。
+    """
+    fill_group_merged(ws, rows, col_map, ratio_type,
+                      build_active_styles(has_wood=False, has_gold=False))
