@@ -36,6 +36,67 @@ OPTIONAL_COLUMNS = [
     "Item Weight",
     "Item Weight Unit",
     "List Price",
+    # Shipping (Package) 列
+    "Item Package Length",
+    "Package Length Unit",
+    "Item Package Width",
+    "Package Width Unit",
+    "Item Package Height",
+    "Package Height Unit",
+    "Package Weight",
+    "Package Weight Unit",
+    # 涂黑列 (样式复制用)
+    "Product Id Type",
+    "Product Id",
+    "Package Level",
+    "Part Number",
+    "Item Shape",
+    "Theme",
+    "Frame Color",
+    "Frame Material",
+    "Frame Type",
+    "Edition",
+    "Print media",
+    "Paint Type",
+    "Paper Finish",
+    "Is Customizable?",
+    "Item Depth",
+    "Orientation",
+    "Pattern",
+    "Mounting Type",
+    "Finish Type",
+    "Team Name",
+    "Color Family",
+    "Animal Theme",
+    "Wall Art Form",
+    "Model Variant",
+    "Border Style",
+    "Backing Material",
+    "Border Width",
+    "Border Width Unit",
+    "Border Type",
+    "Color Count",
+    "Number of Packs",
+    "Set Name",
+    "Letter Character",
+    "Government Contract Name",
+    "Government Contract Number",
+    "Collection Item",
+    "Wood Type",
+    "Value",
+    "Fulfillment Channel Code (US)",
+    "Quantity (US)",
+    "Inventory Always Available (US)",
+    "Your Price USD (Sell on Amazon, US)",
+    "Sale Price USD (Sell on Amazon, US)",
+    "Sale Start Date (Sell on Amazon, US)",
+    "Sale End Date (Sell on Amazon, US)",
+    "Your Price USD (Amazon Business (B2B), US)",
+    "Quantity Price Type (Amazon Business (B2B), US)",
+    "Package Contains SKU Quantity",
+    "Package Contains SKU Identifier",
+    "Metal Type",
+    "Athlete",
 ]
 
 HEADER_ROW = 4      # 新格式: 列名在第 4 行
@@ -220,3 +281,61 @@ def save_workbook(
     wb.save(str(out))
     logger.info("保存文件: %s", out)
     return out
+
+
+def copy_cell_style(src_cell, dst_cell) -> None:
+    """直接复制源单元格的内部 _style 数组到目标单元格.
+
+    比 openpyxl 的 `copy(src)` 更稳定: 不会清空 dst 的 value,
+    只替换 fill/font/border/alignment/number_format 等视觉样式。
+
+    用于把模板单元格的"涂黑/涂色"格式精确复制到目标位置
+    (如把 E8 的深色填充复制到新生成 group 的 parent 行 Parent SKU 列)。
+    """
+    from copy import copy as _copy
+    dst_cell._style = _copy(src_cell._style)
+
+
+def transfer_to_template(source_ws, template_path: str | Path, output_path: str | Path | None = None):
+    """把已处理的主文件数据按格子一一对应搬运到模板文件.
+
+    规则:
+      - 只搬运数据 value, 不碰模板的样式 (涂黑/涂色等保持模板原样)。
+      - 模板与主文件表头 (第 4 行) 一致, 按相同列号逐格搬运。
+      - 先清空模板数据区 (第 8 行起到模板最后数据行), 再写入主文件数据。
+      - 主文件数据区从 DATA_START_ROW 到主文件最后数据行。
+
+    Returns:
+        实际保存的模板输出路径。
+    """
+    from pathlib import Path
+    template_path = Path(template_path)
+    output_path = Path(output_path) if output_path else None
+
+    # 加载模板 (保留 VBA)
+    t_wb, t_ws, t_sheet = load_workbook(template_path)
+
+    # 主文件最后数据行
+    src_last = _find_last_data_row(source_ws)
+    # 模板最后数据行 (用于清空)
+    dst_last = _find_last_data_row(t_ws)
+
+    # 1. 清空模板数据区 (r8 到 dst_last), 只清 value 保留样式
+    for r in range(DATA_START_ROW, dst_last + 1):
+        for c in range(1, t_ws.max_column + 1):
+            t_ws.cell(row=r, column=c).value = None
+
+    # 2. 搬运主文件数据 (只搬 value)
+    src_cols = source_ws.max_column
+    for r in range(DATA_START_ROW, src_last + 1):
+        for c in range(1, src_cols + 1):
+            v = source_ws.cell(row=r, column=c).value
+            if v is not None:
+                t_ws.cell(row=r, column=c).value = v
+
+    # 3. 保存模板
+    if output_path is None:
+        output_path = template_path.parent / f"{template_path.stem}_filled{template_path.suffix}"
+    t_wb.save(str(output_path))
+    logger.info("已搬运数据到模板: %s", output_path)
+    return output_path

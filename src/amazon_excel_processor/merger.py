@@ -242,6 +242,7 @@ def merge_one_painting(
     max_col=None,
     ratio_type="3:2",
     mode="new",
+    name_col=None,
 ):
     """合并 1 画到动态行数结构 (木/金可选).
 
@@ -257,10 +258,13 @@ def merge_one_painting(
         max_col: 列数
         mode: "new" = 新品上架 (全部行 normalize + fill + meta)
               "old_variant" = 老品补充变体 (普文件原 11 行保留不动, 仅变体行处理)
+        name_col: Item Name 列号 (动态从 col_map 读取; None 用硬编码常量)
 
     输出行数 = 1 + 5×(2 + 有木 + 有金): 11 / 16 / 21。
     普文件恒为前 11 行 (parent + Frame×5 + Unframe×5), 变体行紧随其后。
     """
+    if name_col is None:
+        name_col = COL_PRODUCT_NAME
     assert len(main_snapshots) == MAIN_GROUP_SIZE
     has_wood = wood_group is not None
     has_gold = gold_group is not None
@@ -324,7 +328,7 @@ def merge_one_painting(
 
     if mode == "new":
         # 新品上架: 全部行 normalize + fill + meta
-        normalize_group_merged(output_ws, merged_rows, COL_PRODUCT_NAME, ratio_type, active_styles)
+        normalize_group_merged(output_ws, merged_rows, name_col, ratio_type, active_styles)
         fill_group_merged(output_ws, merged_rows, col_map, ratio_type, active_styles)
         _fill_meta_columns(output_ws, merged_rows, col_map)
     elif mode == "old_variant":
@@ -332,7 +336,7 @@ def merge_one_painting(
         # 仅对变体行 (rows[11:]) 做 normalize + fill + meta
         variant_rows = merged_rows[11:]
         variant_styles = active_styles[2:]  # 去掉 frame/unframe, 只剩变体 style
-        _normalize_variant_names(output_ws, merged_rows, variant_rows, COL_PRODUCT_NAME,
+        _normalize_variant_names(output_ws, merged_rows, variant_rows, name_col,
                                  ratio_type, variant_styles)
         _fill_variant_fields(output_ws, variant_rows, col_map, ratio_type, variant_styles)
         _fill_meta_columns_variant(output_ws, variant_rows, col_map)
@@ -342,7 +346,7 @@ def merge_one_painting(
         # 变体行 (merged_rows[1:]) 做 normalize + fill + meta
         variant_rows = merged_rows[1:]
         variant_styles = active_styles  # 只有 wood/gold (build_active_styles 已过滤)
-        _normalize_variant_names(output_ws, merged_rows, variant_rows, COL_PRODUCT_NAME,
+        _normalize_variant_names(output_ws, merged_rows, variant_rows, name_col,
                                  ratio_type, variant_styles)
         _fill_variant_fields(output_ws, variant_rows, col_map, ratio_type, variant_styles)
         _fill_meta_columns_variant(output_ws, variant_rows, col_map)
@@ -350,6 +354,86 @@ def merge_one_painting(
         raise ValueError(f"未知 mode: {mode}")
 
     return merged_rows
+
+
+# 需要涂黑的列名列表 (Parent 行)
+_PARENT_BLACK_COLUMNS = [
+    "Parent SKU", "Product Id Type", "Product Id", "Package Level",
+    "Color", "Size", "Part Number", "Item Shape", "Theme",
+    "Frame Color", "Frame Material", "Frame Type", "Edition",
+    "Print media", "Paint Type", "Paper Finish", "Is Customizable?",
+    "Item Depth", "Orientation", "Pattern", "Mounting Type",
+    "Finish Type", "Team Name", "Color Family", "Animal Theme",
+    "Item Length Longer Edge", "Item Length Unit",
+    "Item Width Shorter Edge", "Item Width Unit",
+    "Wall Art Form", "Model Variant", "Border Style", "Backing Material",
+    "Border Width", "Border Width Unit", "Border Type", "Color Count",
+    "Number of Packs", "Set Name", "Letter Character",
+    "Government Contract Name", "Government Contract Number",
+    "Collection Item", "Wood Type", "Value", "Item Weight Unit",
+    "List Price",
+    "Fulfillment Channel Code (US)", "Quantity (US)",
+    "Inventory Always Available (US)",
+    "Your Price USD (Sell on Amazon, US)",
+    "Sale Price USD (Sell on Amazon, US)",
+    "Sale Start Date (Sell on Amazon, US)",
+    "Sale End Date (Sell on Amazon, US)",
+    "Your Price USD (Amazon Business (B2B), US)",
+    "Quantity Price Type (Amazon Business (B2B), US)",
+    "Item Package Length", "Package Length Unit",
+    "Item Package Width", "Package Width Unit",
+    "Item Package Height", "Package Height Unit",
+    "Package Weight", "Package Weight Unit",
+]
+
+# 需要涂黑的列名列表 (所有行)
+_ALL_BLACK_COLUMNS = [
+    "Package Contains SKU Quantity", "Package Contains SKU Identifier",
+    "Metal Type", "Athlete",
+]
+
+
+def _apply_template_styles(ws, merged_rows, col_map, template_style=None):
+    """把"涂黑"(绿色填充)样式应用到合并输出的对应位置.
+
+    先重置整个 group 所有单元格为默认样式, 再精确涂色:
+      1. Parent 行涂色: merged_rows[0] 行的 _PARENT_BLACK_COLUMNS 列
+      2. 全组涂色: 所有 merged_rows 行的 _ALL_BLACK_COLUMNS 列
+
+    样式: 固定使用亚马逊模板的绿色标记 (FF4A8915)。
+    template_style 保留用于向后兼容 (若提供则复用其样式)。
+    """
+    if not merged_rows:
+        return
+    from openpyxl.styles import PatternFill
+
+    parent_row = merged_rows[0]
+
+    # 先重置全组所有单元格样式 (消除输入文件残留的涂色)
+    for row in merged_rows:
+        for col_idx in col_map.values():
+            ws.cell(row=row, column=col_idx)._style = None
+
+    # 绿色填充 (亚马逊模板标记色)
+    green_fill = PatternFill(patternType='solid', fgColor='FF4A8915')
+
+    def _apply(cell):
+        cell.fill = green_fill
+
+    # 1. Parent 行涂色
+    for col_name in _PARENT_BLACK_COLUMNS:
+        col_idx = col_map.get(col_name)
+        if col_idx is None:
+            continue
+        _apply(ws.cell(row=parent_row, column=col_idx))
+
+    # 2. 全组行涂色
+    for col_name in _ALL_BLACK_COLUMNS:
+        col_idx = col_map.get(col_name)
+        if col_idx is None:
+            continue
+        for row in merged_rows:
+            _apply(ws.cell(row=row, column=col_idx))
 
 
 def _extract_base_name_raw(name: str) -> str:
@@ -384,6 +468,7 @@ def _normalize_variant_names(ws, all_rows, variant_rows, name_col, ratio_type="3
         return
     # 基名保留原样 (不去连字符/标点), 只剥离已有 style/尺寸后缀
     base_title = _extract_base_name_raw(str(parent_value))
+    base_title = _clean_item_name(base_title)
 
     # 变体 labels (不含 parent 占位): 每个 style × 5 (用 Item Name 专用标签)
     var_labels = []
@@ -432,6 +517,35 @@ def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2", variant_st
     _set("List Price", "price")
     _set("Style", "color")
 
+    # Shipping (Package) 字段填充
+    _set("Item Package Length", "package_length")
+    _set("Item Package Width", "package_width")
+    _set("Item Package Height", "package_height")
+    _set("Package Weight", "package_weight")
+
+    # Unit 列填充
+    if "Item Length Unit" in col_map:
+        for row in variant_rows:
+            ws.cell(row=row, column=col_map["Item Length Unit"]).value = "Inches"
+    if "Item Width Unit" in col_map:
+        for row in variant_rows:
+            ws.cell(row=row, column=col_map["Item Width Unit"]).value = "Inches"
+    if "Item Weight Unit" in col_map:
+        for row in variant_rows:
+            ws.cell(row=row, column=col_map["Item Weight Unit"]).value = "Grams"
+    if "Package Length Unit" in col_map:
+        for row in variant_rows:
+            ws.cell(row=row, column=col_map["Package Length Unit"]).value = "Centimeters"
+    if "Package Width Unit" in col_map:
+        for row in variant_rows:
+            ws.cell(row=row, column=col_map["Package Width Unit"]).value = "Centimeters"
+    if "Package Height Unit" in col_map:
+        for row in variant_rows:
+            ws.cell(row=row, column=col_map["Package Height Unit"]).value = "Centimeters"
+    if "Package Weight Unit" in col_map:
+        for row in variant_rows:
+            ws.cell(row=row, column=col_map["Package Weight Unit"]).value = "Kilograms"
+
     # Variation Theme Name / Paint Type / Color Map
     simple_fills = {"Variation Theme Name": "COLOR/SIZE", "Paint Type": "Oil", "Color Map": "Multi"}
     for field, val in simple_fills.items():
@@ -468,8 +582,15 @@ def _fill_meta_columns_variant(ws, variant_rows, col_map):
 def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=None):
     """对合并产品组 (动态行数) 执行 Product Name 规范化。
 
-    active_styles 决定各行 label (含 parent 占位)。始终用 SIZES_32 构造尺寸名
-    (历史行为, 不随 ratio_type 切换)。
+    active_styles 决定各行 label (含 parent 占位)。始终用 SIZES_32 构造尺寸名。
+
+    Item Name 清理规则:
+      1. 提取基名（剥离已有 style/尺寸后缀）
+      2. 删去 .jpg
+      3. 删去末尾 \"-数字\" 后缀
+      4. \"_\" 替换为空格
+      5. 单词去重：每个词最多出现 2 次（case-insensitive）
+      6. 多余空格合并为单空格
     """
     if active_styles is None:
         active_styles = ["frame", "unframe", "wood", "gold"]
@@ -480,6 +601,9 @@ def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=N
         return
     # 基名保留原样 (不去连字符/标点), 只剥离已有 style/尺寸后缀
     base_title = _extract_base_name_raw(str(parent_value))
+
+    # 对基名做清理
+    base_title = _clean_item_name(base_title)
 
     # 逐行 label: [None(parent)] + 每个 style × 5, 用 Item Name 专用标签
     labels = [None]
@@ -502,6 +626,29 @@ def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=N
         cell.value = name
 
 
+def _clean_item_name(text: str) -> str:
+    """Item Name 清理管道 (用于 parent 行基名)。
+
+    规则:
+      1. 删去 .jpg
+      2. 删去末尾 \"-数字\" 后缀
+      3. \"_\" 替换为空格
+      4. 单词去重：每个词最多出现 2 次 (case-insensitive)
+      5. 多余空格合并为单空格
+    """
+    # 删去 .jpg
+    text = re.sub(r'\.(?:jpg|jpeg|png|gif|bmp|webp|tiff?)\b', '', text, flags=re.IGNORECASE)
+    # 删去末尾 \"-数字\" 后缀 (如 \"Negroni Cocktail Recipe Print-1\" → \"Negroni Cocktail Recipe Print\")
+    text = re.sub(r'-(\d+)(?=\s*$)', '', text)
+    # 下划线 → 空格
+    text = text.replace('_', ' ')
+    # 单词去重 (每个词最多 2 次)
+    text = deduplicate_words(text)
+    # 多余空格合并
+    text = collapse_spaces(text)
+    return text
+
+
 def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new"):
     """重写 Seller SKU.
 
@@ -516,11 +663,22 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new"):
               "old_parent" = 老品合并 (父体 SKU 保留, 金木变体从 prefix-1 连续编号)
     """
     if mode == "new":
-        counter = 1
+        parent_counter = 1
+        normal_counter = 1
+        variant_counter = 1
         for group in groups:
-            for row in group:
-                ws.cell(row=row, column=sku_col).value = f"{prefix}-{counter}"
-                counter += 1
+            # group[0] = parent → {prefix}-{parent_counter}
+            ws.cell(row=group[0], column=sku_col).value = f"{prefix}-{parent_counter}"
+            parent_counter += 1
+            # group[1:11] = Frame×5 + Unframe×5 (普通子体) → {prefix}P-{normal_counter}
+            for i in range(1, 11):
+                if i < len(group):
+                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}P-{normal_counter}"
+                    normal_counter += 1
+            # group[11:] = Wood×5 + Gold×5 (木金子体) → {prefix}J-{variant_counter}
+            for i in range(11, len(group)):
+                ws.cell(row=group[i], column=sku_col).value = f"{prefix}J-{variant_counter}"
+                variant_counter += 1
     elif mode == "old_variant":
         # 老品补充变体: 普文件原 11 行 (group[0:11]) SKU 保留, 变体行 (group[11:]) 重写
         counter = 1
@@ -662,15 +820,22 @@ def merge_files(
                 f"金框文件类型错误: {gold_path.name} 是 {gold_role}, 期望 variant (6 行/组)"
             )
 
-    main_by_name = index_groups_by_name(main_ws, main_groups, file_label="普文件")
-    wood_by_name = index_groups_by_name(wood_ws, wood_groups, file_label="木框文件") if has_wood else {}
-    gold_by_name = index_groups_by_name(gold_ws, gold_groups, file_label="金框文件") if has_gold else {}
+    col_map = locate_columns(main_ws)
+
+    # 动态列号: 优先从 col_map 读取 (支持带反馈列/偏移布局), 否则回退硬编码常量
+    name_col = col_map.get("Item Name", COL_PRODUCT_NAME)
+    sku_col = col_map.get("SKU", COL_SELLER_SKU)
+    parent_sku_col = col_map.get("Parent SKU", COL_PARENT_SKU)
+    logger.info("动态列号: Item Name=列%d, SKU=列%d, Parent SKU=列%d",
+                name_col, sku_col, parent_sku_col)
+
+    main_by_name = index_groups_by_name(main_ws, main_groups, name_col, file_label="普文件")
+    wood_by_name = index_groups_by_name(wood_ws, wood_groups, name_col, file_label="木框文件") if has_wood else {}
+    gold_by_name = index_groups_by_name(gold_ws, gold_groups, name_col, file_label="金框文件") if has_gold else {}
 
     # 检查配对完整性 (no-op 桩, 实际配对在主循环 pair_counter 处理)
     _check_pairing(main_by_name, wood_by_name, gold_by_name,
                    main_ws, wood_ws, gold_ws)
-
-    col_map = locate_columns(main_ws)
 
     # 关键: 在合并前一次性快照所有 main 行 + 提前算 base name
     snap_cols = [main_ws.max_column]
@@ -684,7 +849,7 @@ def merge_files(
         for g in main_groups
         for r in g
     }
-    main_base_names = {id(g): _group_base_name(main_ws, g) for g in main_groups}
+    main_base_names = {id(g): _group_base_name(main_ws, g, name_col) for g in main_groups}
 
     if mode == "old_parent":
         # 老品合并: 只保留父体 + 金木变体 (不含 Frame/Unframe)
@@ -714,7 +879,7 @@ def merge_files(
         gold_list = gold_by_name.get(name, []) if has_gold else None
         # 文件整体缺失不报错; 只有"文件存在但缺该画"才进 skipped
         if (has_wood and idx >= len(wood_list)) or (has_gold and idx >= len(gold_list)):
-            main_raw = _get_raw_name(main_ws, main_g, COL_PRODUCT_NAME)
+            main_raw = _get_raw_name(main_ws, main_g, name_col)
             skipped.append((name, main_raw, idx,
                             len(wood_list) if has_wood else None,
                             len(gold_list) if has_gold else None))
@@ -733,6 +898,7 @@ def merge_files(
             gold_ws=gold_ws,
             max_col=max_col_for_snapshot,
             mode=mode,
+            name_col=name_col,
         )
         new_groups.append(merged)
         out_row += group_size
@@ -740,10 +906,15 @@ def merge_files(
     # 配不上的报错 (用模糊匹配给候选)
     if skipped:
         _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
-                             has_wood, has_gold)
+                             has_wood, has_gold, name_col)
 
-    rewrite_sku(main_ws, new_groups, prefix, mode=mode)
-    write_parent_sku_formulas(main_ws, new_groups, mode=mode)
+    rewrite_sku(main_ws, new_groups, prefix, sku_col=sku_col, mode=mode)
+    write_parent_sku_formulas(main_ws, new_groups, parent_sku_col=parent_sku_col,
+                              seller_sku_col=sku_col, mode=mode)
+
+    # 应用涂黑样式 (每个 group 的 parent 行和全组行)
+    for g in new_groups:
+        _apply_template_styles(main_ws, g, col_map)
 
     out = save_workbook(
         main_ws,
@@ -773,12 +944,14 @@ def _check_pairing(main_by_name, wood_by_name, gold_by_name,
 
 
 def _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
-                         has_wood=True, has_gold=True):
+                         has_wood=True, has_gold=True, name_col=None):
     """配不上时用模糊匹配找候选, 报错列出。
 
     木/金文件整体缺失 (has_wood/has_gold=False) 时, 对应文件报"未提供"且不列候选。
     只有"文件存在但缺该画"才会到达这里 (文件整体缺失在主循环不会进 skipped)。
     """
+    if name_col is None:
+        name_col = COL_PRODUCT_NAME
     errors = []
     for name, main_raw, idx, wood_count, gold_count in skipped:
         msg = f"  普文件产品找不到配对:\n"
@@ -794,7 +967,7 @@ def _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
             if wood_candidates:
                 msg += f"    最接近的木框候选:\n"
                 for cname, ratio in wood_candidates[:3]:
-                    wood_raw = _get_raw_name(wood_ws, wood_by_name[cname][0], COL_PRODUCT_NAME)
+                    wood_raw = _get_raw_name(wood_ws, wood_by_name[cname][0], name_col)
                     msg += f"      [{ratio:.0%}] {wood_raw}\n"
         if has_gold:
             all_gold_keys = list(gold_by_name.keys())
@@ -802,7 +975,7 @@ def _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
             if gold_candidates:
                 msg += f"    最接近的金框候选:\n"
                 for cname, ratio in gold_candidates[:3]:
-                    gold_raw = _get_raw_name(gold_ws, gold_by_name[cname][0], COL_PRODUCT_NAME)
+                    gold_raw = _get_raw_name(gold_ws, gold_by_name[cname][0], name_col)
                     msg += f"      [{ratio:.0%}] {gold_raw}\n"
         errors.append(msg)
 

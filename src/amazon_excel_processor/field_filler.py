@@ -80,12 +80,51 @@ WIDTH_32_21 = [""] + [8, 12, 16, 20, 24] * 4
 
 # Weight: parent=空, Frame 和 Wood/Gold 均为 0.18-0.88, Unframe 为 0.02-0.25
 WEIGHT_SEQUENCE_21 = [
-    "",
+    1,
     300, 400, 600, 1000, 1500,   # Frame×5
     80, 90, 130, 180, 240,       # Unframe×5
     450, 850, 1500, 2400, 3400,  # Wood×5
     450, 850, 1500, 2400, 3400,  # Gold×5
 ]
+
+# Shipping (Package) — 21 行: parent 空, 普通 10 行, 木金 10 行
+# 普通 Frame×5 + Unframe×5: L/W = (30,20)(45,30)(60,40)(75,50)(90,60) 各 2 段
+# 木金 Wood×5 + Gold×5:    L/W = (32,22)(47,32)(62,42)(77,52)(92,62)
+# Height: 1 (普通) / 4.5 (木金)
+# Weight: 0.18/0.28/0.48/0.68/0.88 (普通 5 + 木金 5), 0.02/0.04/0.07/0.15/0.25 (普通 unframe 5)
+PACKAGE_LENGTH_21 = [
+    "",
+    30, 45, 60, 75, 90,           # Frame×5
+    30, 45, 60, 75, 90,           # Unframe×5
+    32, 47, 62, 77, 92,           # Wood×5
+    32, 47, 62, 77, 92,           # Gold×5
+]
+PACKAGE_WIDTH_21 = [
+    "",
+    20, 30, 40, 50, 60,           # Frame×5
+    20, 30, 40, 50, 60,           # Unframe×5
+    22, 32, 42, 52, 62,           # Wood×5
+    22, 32, 42, 52, 62,           # Gold×5
+]
+PACKAGE_HEIGHT_21 = [
+    "",
+    1, 1, 1, 1, 1,                # Frame×5
+    1, 1, 1, 1, 1,                # Unframe×5
+    4.5, 4.5, 4.5, 4.5, 4.5,      # Wood×5
+    4.5, 4.5, 4.5, 4.5, 4.5,      # Gold×5
+]
+PACKAGE_WEIGHT_21 = [
+    "",
+    0.18, 0.28, 0.48, 0.68, 0.88,   # Frame×5
+    0.02, 0.04, 0.07, 0.15, 0.25,   # Unframe×5
+    0.18, 0.28, 0.48, 0.68, 0.88,   # Wood×5
+    0.18, 0.28, 0.48, 0.68, 0.88,   # Gold×5
+]
+PACKAGE_LENGTH_UNIT_21 = "Centimeters"  # 全组统一
+PACKAGE_WIDTH_UNIT_21 = "Centimeters"
+PACKAGE_HEIGHT_UNIT_21 = "Centimeters"
+PACKAGE_WEIGHT_UNIT_21 = "Kilograms"
+
 
 # Price: parent=空, Frame: 19.9/29.9/45/75/99, Unframe: 11.9/14.9/19.9/24.9/34.9,
 #        Wood: 26.9/39.9/59.9/99.9/129.9, Gold: 26.9/39.9/59.9/99.9/129.9
@@ -122,21 +161,40 @@ STYLE_SPECS = {
         # 新格式: Item Weight 单位为 Grams (克)
         "weight": [300, 400, 600, 1000, 1500],
         "price": [19.9, 29.9, 45, 75, 99],
+        # Package (Shipping) — 普通: L/W = (30,20)(45,30)(60,40)(75,50)(90,60)
+        "package_length": [30, 45, 60, 75, 90],
+        "package_width": [20, 30, 40, 50, 60],
+        "package_height": [1, 1, 1, 1, 1],
+        "package_weight": [0.18, 0.28, 0.48, 0.68, 0.88],
     },
     "unframe": {
         "label": "Unframe-style",
         "weight": [80, 90, 130, 180, 240],
         "price": [11.9, 14.9, 19.9, 24.9, 34.9],
+        # Package — 普通 unframe: L/W 同 frame 序列, 重量更小 (0.02-0.25)
+        "package_length": [30, 45, 60, 75, 90],
+        "package_width": [20, 30, 40, 50, 60],
+        "package_height": [1, 1, 1, 1, 1],
+        "package_weight": [0.02, 0.04, 0.07, 0.15, 0.25],
     },
     "wood": {
         "label": "Vintage Wood Grain Frame-style",
         "weight": [450, 850, 1500, 2400, 3400],
         "price": [26.9, 39.9, 59.9, 99.9, 129.9],
+        # Package — 木金: L/W = (32,22)(47,32)(62,42)(77,52)(92,62), H=4.5, Weight 大
+        "package_length": [32, 47, 62, 77, 92],
+        "package_width": [22, 32, 42, 52, 62],
+        "package_height": [4.5, 4.5, 4.5, 4.5, 4.5],
+        "package_weight": [0.18, 0.28, 0.48, 0.68, 0.88],
     },
     "gold": {
         "label": "Vintage Ornate Gold Frame-style",
         "weight": [450, 850, 1500, 2400, 3400],
         "price": [26.9, 39.9, 59.9, 99.9, 129.9],
+        "package_length": [32, 47, 62, 77, 92],
+        "package_width": [22, 32, 42, 52, 62],
+        "package_height": [4.5, 4.5, 4.5, 4.5, 4.5],
+        "package_weight": [0.18, 0.28, 0.48, 0.68, 0.88],
     },
 }
 
@@ -170,10 +228,15 @@ def _build_sequences(active_styles: list) -> dict:
         "size_32": [""],
         "length": [""],
         "width": [""],
-        "weight": [""],
+        "weight": [1],
         "price": [""],
         "edge": [1],
         "labels": [None],
+        # Shipping (Package)
+        "package_length": [""],
+        "package_width": [""],
+        "package_height": [""],
+        "package_weight": [""],
     }
     for key in active_styles:
         spec = STYLE_SPECS[key]
@@ -187,6 +250,10 @@ def _build_sequences(active_styles: list) -> dict:
         seqs["price"].extend(spec["price"])
         seqs["edge"].extend(_STYLE_EDGE)
         seqs["labels"].extend([label] * 5)
+        seqs["package_length"].extend(spec["package_length"])
+        seqs["package_width"].extend(spec["package_width"])
+        seqs["package_height"].extend(spec["package_height"])
+        seqs["package_weight"].extend(spec["package_weight"])
     return seqs
 
 
@@ -246,6 +313,34 @@ def fill_group_merged(
     # 新格式: List Price (col154) 就是价格列, 直接填价格 (无 Your Price 同步)
     _fill_seq(ws, rows, col_map, "List Price", seqs["price"])
     _fill_seq(ws, rows, col_map, "Style", seqs["color"])
+
+    # Shipping (Package) 字段填充
+    _fill_seq(ws, rows, col_map, "Item Package Length", seqs["package_length"])
+    _fill_seq(ws, rows, col_map, "Item Package Width", seqs["package_width"])
+    _fill_seq(ws, rows, col_map, "Item Package Height", seqs["package_height"])
+    _fill_seq(ws, rows, col_map, "Package Weight", seqs["package_weight"])
+
+    # Unit 列全组统一填充
+    if "Item Length Unit" in col_map:
+        _fill_const(ws, rows, col_map["Item Length Unit"], "Inches")
+    if "Item Width Unit" in col_map:
+        _fill_const(ws, rows, col_map["Item Width Unit"], "Inches")
+    if "Item Weight Unit" in col_map:
+        _fill_const(ws, rows, col_map["Item Weight Unit"], "Grams")
+    if "Package Length Unit" in col_map:
+        _fill_const(ws, rows, col_map["Package Length Unit"], "Centimeters")
+    if "Package Width Unit" in col_map:
+        _fill_const(ws, rows, col_map["Package Width Unit"], "Centimeters")
+    if "Package Height Unit" in col_map:
+        _fill_const(ws, rows, col_map["Package Height Unit"], "Centimeters")
+    if "Package Weight Unit" in col_map:
+        _fill_const(ws, rows, col_map["Package Weight Unit"], "Kilograms")
+
+
+def _fill_const(ws, rows, col_idx, value):
+    """填充所有行为同一个常量值."""
+    for row in rows:
+        ws.cell(row=row, column=col_idx).value = value
 
 
 def _fill_seq(ws, rows, col_map, field_name, sequence):

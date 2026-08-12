@@ -42,7 +42,7 @@ def main():
         log_print(">> 文件加载完成")
 
         col_map = locate_columns(ws)
-        product_name_col = col_map["Product Name"]
+        product_name_col = col_map["Item Name"]
         log_print(f">> 列定位完成: {', '.join(col_map.keys())}")
 
         groups = group_rows(ws)

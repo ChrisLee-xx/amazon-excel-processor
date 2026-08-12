@@ -23,7 +23,14 @@ from amazon_excel_processor.merger import (
 # ===== 测试夹具 =====
 
 def _create_main_workbook(paintings):
-    """模拟"普文件"(新格式): N 画各 11 行 (1 parent + 5 Frame + 5 Unframe). 返回 (wb, col_map)."""
+    """模拟"普文件"(新格式): N 画各 11 行 (1 parent + 5 Frame + 5 Unframe). 返回 (wb, col_map).
+
+    表头包含:
+      - 基础测试列 (col 1-154)
+      - 所有涂黑列 (从 col 200 起), 确保 col_map 覆盖全部涂黑测试需求
+    """
+    from amazon_excel_processor.merger import _PARENT_BLACK_COLUMNS, _ALL_BLACK_COLUMNS
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Template"
@@ -33,6 +40,16 @@ def _create_main_workbook(paintings):
         124: "Item Length Longer Edge", 126: "Item Width Shorter Edge",
         147: "Item Weight", 154: "List Price",
     }
+    # 从 col 200 起追加所有涂黑列 (避开现有测试用到的 col 1-154)
+    _extra_col = 200
+    for col_name in _PARENT_BLACK_COLUMNS:
+        if col_name not in headers.values():
+            headers[_extra_col] = col_name
+            _extra_col += 1
+    for col_name in _ALL_BLACK_COLUMNS:
+        if col_name not in headers.values():
+            headers[_extra_col] = col_name
+            _extra_col += 1
     for c, h in headers.items():
         ws.cell(row=HEADER_ROW, column=c).value = h
     row = DATA_START_ROW
@@ -336,29 +353,106 @@ class TestMergeOnePainting:
             assert main_ws.cell(row=r, column=55).value == "Vintage Ornate Gold Frame-style"
             assert main_ws.cell(row=r, column=154).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
 
+    def test_parent_row_style_copied_from_e8(self):
+        """parent 行的所有 _PARENT_BLACK_COLUMNS 列应为绿色填充 (亚马逊标记色).
+
+        同时验证:
+          - 全组涂黑列 (_ALL_BLACK_COLUMNS) 在 parent 行和 child 行都被涂黑
+          - Parent 行涂黑列在 child 行不被涂黑
+        """
+        from amazon_excel_processor.excel_io import DATA_START_ROW
+        from amazon_excel_processor.merger import (
+            _apply_template_styles,
+            _PARENT_BLACK_COLUMNS,
+            _ALL_BLACK_COLUMNS,
+        )
+        s = _setup_merge_one_painting()
+        main_ws = s["main_ws"]
+        col_map = s["main_col_map"]
+        merged = merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
+            output_start_row=DATA_START_ROW,
+            output_ws=main_ws,
+            col_map=col_map,
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
+        )
+        # 应用涂黑样式
+        _apply_template_styles(main_ws, merged, col_map)
+        parent_row = merged[0]
+        child_rows = merged[1:]
+        green = 'FF4A8915'
+
+        # 1. Parent 行: 所有 _PARENT_BLACK_COLUMNS 列都应被涂黑
+        missing_in_map = [c for c in _PARENT_BLACK_COLUMNS if c not in col_map]
+        assert not missing_in_map, f"涂黑列缺失 col_map 映射: {missing_in_map}"
+        not_black = [
+            c for c in _PARENT_BLACK_COLUMNS
+            if main_ws.cell(row=parent_row, column=col_map[c]).fill.fgColor.rgb != green
+        ]
+        assert not not_black, f"Parent 行以下列未被涂黑: {not_black}"
+
+        # 2. 全组涂黑列: parent 和所有 child 行都应被涂黑
+        missing_all = [c for c in _ALL_BLACK_COLUMNS if c not in col_map]
+        assert not missing_all, f"全组涂黑列缺失 col_map 映射: {missing_all}"
+        for col_name in _ALL_BLACK_COLUMNS:
+            col_idx = col_map[col_name]
+            for r in merged:
+                assert main_ws.cell(row=r, column=col_idx).fill.fgColor.rgb == green, (
+                    f"全组涂黑列 '{col_name}' 在行 {r} 未被涂黑"
+                )
+
+        # 3. Parent 涂黑列在 child 行不应被涂黑 (验证仅 parent 行涂色, 非全组)
+        #    抽查 Parent SKU (col 5) 在第一个 child 行
+        if child_rows:
+            child_e = main_ws.cell(row=child_rows[0], column=col_map["Parent SKU"])
+            assert child_e.fill.fgColor.rgb != green, (
+                "Parent SKU 在 child 行不应被涂黑 (仅 parent 行涂色)"
+            )
+
 
 # ===== rewrite_sku =====
 
 class TestRewriteSku:
     def test_continuous_numbering_new_mode(self):
-        """新品上架: 全部 21 行 × N 画从 prefix-1 连续编号"""
+        """新品上架: 父体={prefix}-N, 普通子体={prefix}P-N, 木金子体={prefix}J-N, 三套独立编号"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25)), list(range(25, 46))]
         rewrite_sku(ws, groups, prefix="HM725", mode="new")
+        # group 1: parent = HM725-1
         assert ws.cell(row=4, column=1).value == "HM725-1"
-        assert ws.cell(row=5, column=1).value == "HM725-2"
-        assert ws.cell(row=24, column=1).value == "HM725-21"
-        assert ws.cell(row=25, column=1).value == "HM725-22"
-        assert ws.cell(row=45, column=1).value == "HM725-42"
+        # group 1: 普通子体 (r5-r14) = HM725P-1 到 HM725P-10
+        assert ws.cell(row=5, column=1).value == "HM725P-1"
+        assert ws.cell(row=14, column=1).value == "HM725P-10"
+        # group 1: 木金子体 (r15-r24) = HM725J-1 到 HM725J-10
+        assert ws.cell(row=15, column=1).value == "HM725J-1"
+        assert ws.cell(row=24, column=1).value == "HM725J-10"
+        # group 2: parent = HM725-2
+        assert ws.cell(row=25, column=1).value == "HM725-2"
+        # group 2: 普通子体 = HM725P-11 到 HM725P-20
+        assert ws.cell(row=26, column=1).value == "HM725P-11"
+        assert ws.cell(row=35, column=1).value == "HM725P-20"
+        # group 2: 木金子体 = HM725J-11 到 HM725J-20
+        assert ws.cell(row=36, column=1).value == "HM725J-11"
+        assert ws.cell(row=45, column=1).value == "HM725J-20"
 
     def test_single_group_new_mode(self):
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25))]
         rewrite_sku(ws, groups, prefix="AB", mode="new")
+        # parent
         assert ws.cell(row=4, column=1).value == "AB-1"
-        assert ws.cell(row=24, column=1).value == "AB-21"
+        # 普通子体
+        assert ws.cell(row=5, column=1).value == "ABP-1"
+        assert ws.cell(row=14, column=1).value == "ABP-10"
+        # 木金子体
+        assert ws.cell(row=15, column=1).value == "ABJ-1"
+        assert ws.cell(row=24, column=1).value == "ABJ-10"
 
     def test_old_variant_mode_preserves_main_sku(self):
         """老品补充变体: group[0:11] (普文件原 11 行) SKU 保留, group[11:21] 重写"""
@@ -654,6 +748,7 @@ class TestDynamicSequencesBackwardCompat:
             build_active_styles, _build_sequences,
             COLOR_SEQUENCE_21, SIZE_MAP_SEQUENCE_21, SIZE_32_21,
             LENGTH_32_21, WIDTH_32_21, WEIGHT_SEQUENCE_21, PRICE_SEQUENCE_21,
+            PACKAGE_LENGTH_21, PACKAGE_WIDTH_21, PACKAGE_HEIGHT_21, PACKAGE_WEIGHT_21,
         )
         seqs = _build_sequences(build_active_styles(True, True))
         assert seqs["color"] == COLOR_SEQUENCE_21
@@ -665,3 +760,7 @@ class TestDynamicSequencesBackwardCompat:
         assert seqs["price"] == PRICE_SEQUENCE_21
         assert seqs["edge"] == [1] + [12, 18, 24, 30, 36] * 4
         assert seqs["labels"][1:] == VARIANT_LABELS_21[1:]
+        assert seqs["package_length"] == PACKAGE_LENGTH_21
+        assert seqs["package_width"] == PACKAGE_WIDTH_21
+        assert seqs["package_height"] == PACKAGE_HEIGHT_21
+        assert seqs["package_weight"] == PACKAGE_WEIGHT_21
