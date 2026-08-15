@@ -13,7 +13,6 @@ from amazon_excel_processor.merger import (
     merge_one_painting,
     rewrite_sku,
     write_parent_sku_formulas,
-    fill_list_price_synced,
     build_sku_prefix,
     MAIN_GROUP_SIZE,
     VARIANT_GROUP_SIZE,
@@ -23,14 +22,7 @@ from amazon_excel_processor.merger import (
 # ===== 测试夹具 =====
 
 def _create_main_workbook(paintings):
-    """模拟"普文件"(新格式): N 画各 11 行 (1 parent + 5 Frame + 5 Unframe). 返回 (wb, col_map).
-
-    表头包含:
-      - 基础测试列 (col 1-154)
-      - 所有涂黑列 (从 col 200 起), 确保 col_map 覆盖全部涂黑测试需求
-    """
-    from amazon_excel_processor.merger import _PARENT_BLACK_COLUMNS, _ALL_BLACK_COLUMNS
-
+    """模拟"普文件"(新格式): N 画各 11 行 (1 parent + 5 Frame + 5 Unframe). 返回 (wb, col_map)."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Template"
@@ -40,16 +32,6 @@ def _create_main_workbook(paintings):
         124: "Item Length Longer Edge", 126: "Item Width Shorter Edge",
         147: "Item Weight", 154: "List Price",
     }
-    # 从 col 200 起追加所有涂黑列 (避开现有测试用到的 col 1-154)
-    _extra_col = 200
-    for col_name in _PARENT_BLACK_COLUMNS:
-        if col_name not in headers.values():
-            headers[_extra_col] = col_name
-            _extra_col += 1
-    for col_name in _ALL_BLACK_COLUMNS:
-        if col_name not in headers.values():
-            headers[_extra_col] = col_name
-            _extra_col += 1
     for c, h in headers.items():
         ws.cell(row=HEADER_ROW, column=c).value = h
     row = DATA_START_ROW
@@ -354,64 +336,30 @@ class TestMergeOnePainting:
             assert main_ws.cell(row=r, column=154).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
 
     def test_parent_row_style_copied_from_e8(self):
-        """parent 行的所有 _PARENT_BLACK_COLUMNS 列应为绿色填充 (亚马逊标记色).
-
-        同时验证:
-          - 全组涂黑列 (_ALL_BLACK_COLUMNS) 在 parent 行和 child 行都被涂黑
-          - Parent 行涂黑列在 child 行不被涂黑
-        """
+        """parent 行的 Parent SKU (E 列) 样式应复制自模板 E8 (深色填充)."""
+        from openpyxl.styles import PatternFill
         from amazon_excel_processor.excel_io import DATA_START_ROW
-        from amazon_excel_processor.merger import (
-            _apply_template_styles,
-            _PARENT_BLACK_COLUMNS,
-            _ALL_BLACK_COLUMNS,
-        )
         s = _setup_merge_one_painting()
         main_ws = s["main_ws"]
-        col_map = s["main_col_map"]
-        merged = merge_one_painting(
+        # 给模板 r=DATA_START_ROW (模拟 E8) 设置一个明显的填充
+        template_e = main_ws.cell(row=DATA_START_ROW, column=5)
+        template_e.fill = PatternFill(
+            patternType='solid', fgColor='FF632523'
+        )
+        merge_one_painting(
             main_snapshots=s["main_snapshots"],
             wood_group=s["wood_group"],
             gold_group=s["gold_group"],
             output_start_row=DATA_START_ROW,
             output_ws=main_ws,
-            col_map=col_map,
+            col_map=s["main_col_map"],
             wood_ws=s["wood_ws"],
             gold_ws=s["gold_ws"],
             max_col=s["max_col"],
         )
-        # 应用涂黑样式
-        _apply_template_styles(main_ws, merged, col_map)
-        parent_row = merged[0]
-        child_rows = merged[1:]
-        green = 'FF4A8915'
-
-        # 1. Parent 行: 所有 _PARENT_BLACK_COLUMNS 列都应被涂黑
-        missing_in_map = [c for c in _PARENT_BLACK_COLUMNS if c not in col_map]
-        assert not missing_in_map, f"涂黑列缺失 col_map 映射: {missing_in_map}"
-        not_black = [
-            c for c in _PARENT_BLACK_COLUMNS
-            if main_ws.cell(row=parent_row, column=col_map[c]).fill.fgColor.rgb != green
-        ]
-        assert not not_black, f"Parent 行以下列未被涂黑: {not_black}"
-
-        # 2. 全组涂黑列: parent 和所有 child 行都应被涂黑
-        missing_all = [c for c in _ALL_BLACK_COLUMNS if c not in col_map]
-        assert not missing_all, f"全组涂黑列缺失 col_map 映射: {missing_all}"
-        for col_name in _ALL_BLACK_COLUMNS:
-            col_idx = col_map[col_name]
-            for r in merged:
-                assert main_ws.cell(row=r, column=col_idx).fill.fgColor.rgb == green, (
-                    f"全组涂黑列 '{col_name}' 在行 {r} 未被涂黑"
-                )
-
-        # 3. Parent 涂黑列在 child 行不应被涂黑 (验证仅 parent 行涂色, 非全组)
-        #    抽查 Parent SKU (col 5) 在第一个 child 行
-        if child_rows:
-            child_e = main_ws.cell(row=child_rows[0], column=col_map["Parent SKU"])
-            assert child_e.fill.fgColor.rgb != green, (
-                "Parent SKU 在 child 行不应被涂黑 (仅 parent 行涂色)"
-            )
+        # parent 行 (output_start_row) 的 E 列 fill 应与原模板一致 (FG=FF632523)
+        parent_e = main_ws.cell(row=DATA_START_ROW, column=5)
+        assert parent_e.fill.fgColor.rgb == 'FF632523'
 
 
 # ===== rewrite_sku =====
@@ -530,33 +478,6 @@ class TestWriteParentSkuFormulas:
         assert ws.cell(row=16, column=5).value == "=E15"
         # r24 (Gold 5) = =AA23
         assert ws.cell(row=24, column=5).value == "=E23"
-
-
-# ===== fill_list_price_synced =====
-
-class TestFillListPriceSynced:
-    def test_list_price_matches_your_price(self):
-        wb = Workbook()
-        ws = wb.active
-        ws.cell(row=HEADER_ROW, column=154).value = "Your Price"
-        ws.cell(row=HEADER_ROW, column=154).value = "List Price"
-        rows = [4, 5, 6]
-        ws.cell(row=4, column=154).value = None
-        ws.cell(row=5, column=154).value = 19.9
-        ws.cell(row=6, column=154).value = 29.9
-        fill_list_price_synced(ws, rows, col_map={"Your Price": 13, "List Price": 145})
-        assert ws.cell(row=4, column=154).value is None
-        assert ws.cell(row=5, column=154).value == 19.9
-        assert ws.cell(row=6, column=154).value == 29.9
-
-    def test_missing_columns_no_op(self):
-        wb = Workbook()
-        ws = wb.active
-        ws.cell(row=HEADER_ROW, column=154).value = "Your Price"
-        rows = [4, 5]
-        ws.cell(row=5, column=154).value = 19.9
-        fill_list_price_synced(ws, rows, col_map={"Your Price": 13})
-        assert ws.cell(row=5, column=154).value == 19.9
 
 
 # ===== build_sku_prefix =====
@@ -737,6 +658,44 @@ class TestMergeFilesOptional:
         assert ws.cell(row=23, column=55).value == "Vintage Wood Grain Frame-style"
         assert ws.cell(row=24, column=55).value in (None, "")  # 无金行
 
+    def test_pairing_error_shows_product_name(self, tmp_path):
+        """配对失败时错误信息应包含原始 Product Name (不是空)。
+
+        回归: merge_files 清空 main_ws 数据区后, 配对失败的 Product Name
+        必须从快照读取, 否则错误信息中 Product Name 为空。
+        """
+        from amazon_excel_processor.merger import merge_files
+        main_wb, _ = _create_main_workbook(["Art A", "Sunset Beach"])
+        gold_wb = _create_variant_workbook(["Art A"], role="gold")  # 缺 Sunset Beach
+        main_p = tmp_path / "main.xlsx"
+        gold_p = tmp_path / "gold.xlsx"
+        main_wb.save(str(main_p))
+        gold_wb.save(str(gold_p))
+        with pytest.raises(ValueError) as excinfo:
+            merge_files(main_path=main_p, wood_path=None, gold_path=gold_p,
+                        sku_prefix="T", mode="new")
+        msg = str(excinfo.value)
+        assert "Sunset Beach" in msg  # 原始 Product Name 应出现, 不是空
+
+
+# ===== Search Terms 清理 (new 模式) =====
+
+class TestSearchTermsCleaning:
+    """new 模式 (fill_group_merged) 应清理 Search Terms 下划线。"""
+
+    def test_new_mode_cleans_search_terms(self):
+        """new 模式下 Search Terms 的下划线应替换为空格。"""
+        from amazon_excel_processor.field_filler import fill_group_merged, build_active_styles
+        wb = Workbook()
+        ws = wb.active
+        col_map = {"Search Terms": 200, "Color": 55}
+        rows = list(range(8, 19))  # 11 行
+        for r in rows:
+            ws.cell(row=r, column=200).value = "art_print_wall_decor"
+        fill_group_merged(ws, rows, col_map, "3:2", build_active_styles(False, False))
+        for r in rows:
+            assert ws.cell(row=r, column=200).value == "art print wall decor"
+
 
 # ===== 向后兼容: 动态序列 == 21 行常量 =====
 
@@ -758,9 +717,218 @@ class TestDynamicSequencesBackwardCompat:
         assert seqs["width"] == WIDTH_32_21
         assert seqs["weight"] == WEIGHT_SEQUENCE_21
         assert seqs["price"] == PRICE_SEQUENCE_21
-        assert seqs["edge"] == [1] + [12, 18, 24, 30, 36] * 4
         assert seqs["labels"][1:] == VARIANT_LABELS_21[1:]
         assert seqs["package_length"] == PACKAGE_LENGTH_21
         assert seqs["package_width"] == PACKAGE_WIDTH_21
         assert seqs["package_height"] == PACKAGE_HEIGHT_21
         assert seqs["package_weight"] == PACKAGE_WEIGHT_21
+
+
+# ===== Style 列保留原始值 (不被 Color 覆盖) =====
+
+class TestStyleColumnPreserved:
+    """fill_group_merged / _fill_variant_fields 不应覆盖 Style 列, 只填 Color 列。"""
+
+    def test_fill_group_merged_keeps_style(self):
+        """new 模式: Style 列保留原始值, Color 列填 style 标签。"""
+        from amazon_excel_processor.field_filler import fill_group_merged, build_active_styles
+        wb = Workbook()
+        ws = wb.active
+        col_map = {"Color": 55, "Style": 46}
+        rows = list(range(8, 19))  # 11 行
+        # 预设 Style 列原始值 (模拟用户手填)
+        original_styles = ["orig-parent", "orig-f1", "orig-f2", "orig-f3", "orig-f4", "orig-f5",
+                           "orig-u1", "orig-u2", "orig-u3", "orig-u4", "orig-u5"]
+        for i, r in enumerate(rows):
+            ws.cell(row=r, column=46).value = original_styles[i]
+        fill_group_merged(ws, rows, col_map, "3:2", build_active_styles(False, False))
+        # Style 列应保留原始值
+        for i, r in enumerate(rows):
+            assert ws.cell(row=r, column=46).value == original_styles[i], \
+                f"row {r} Style 列被覆盖"
+        # Color 列应被填充 (parent 空, 子体有标签)
+        assert ws.cell(row=rows[0], column=55).value == ""
+        assert ws.cell(row=rows[1], column=55).value == "Frame-style"
+        assert ws.cell(row=rows[6], column=55).value == "Unframe-style"
+
+
+# ===== 单文件模式 SKU 重写 (无木金 J 后缀) =====
+
+class TestSingleFileSkuRewrite:
+    """单文件 (11 行/组) SKU 命名: 父体 prefix-N, 普通子体 prefixP-N。"""
+
+    def test_single_file_sku_naming(self):
+        """单文件 mode=new: parent=prefix-1, 子体=prefixP-1..prefixP-10。"""
+        from amazon_excel_processor.merger import rewrite_sku, write_parent_sku_formulas
+        wb = Workbook()
+        ws = wb.active
+        ws.cell(row=HEADER_ROW, column=1).value = "SKU"
+        ws.cell(row=HEADER_ROW, column=5).value = "Parent SKU"
+        # 2 组 × 11 行 = 22 行
+        groups = [list(range(8, 19)), list(range(19, 30))]
+        for g in groups:
+            for r in g:
+                ws.cell(row=r, column=1).value = f"OLD-{r}"
+        rewrite_sku(ws, groups, "XL810Z", sku_col=1, mode="new")
+        # 第 1 组
+        assert ws.cell(row=8, column=1).value == "XL810Z-1"      # parent
+        assert ws.cell(row=9, column=1).value == "XL810ZP-1"     # 子体 1
+        assert ws.cell(row=18, column=1).value == "XL810ZP-10"   # 子体 10
+        # 第 2 组
+        assert ws.cell(row=19, column=1).value == "XL810Z-2"     # parent
+        assert ws.cell(row=20, column=1).value == "XL810ZP-11"   # 子体 11
+        assert ws.cell(row=29, column=1).value == "XL810ZP-20"   # 子体 20
+        # 无 J 后缀 (单文件没有木金)
+        for g in groups:
+            for r in g[1:]:
+                assert "J" not in str(ws.cell(row=r, column=1).value)
+
+    def test_single_file_parent_sku_formulas(self):
+        """单文件 mode=new: parent 行 Parent SKU 清空, 子体用公式引用。"""
+        from amazon_excel_processor.merger import write_parent_sku_formulas
+        wb = Workbook()
+        ws = wb.active
+        ws.cell(row=HEADER_ROW, column=1).value = "SKU"
+        ws.cell(row=HEADER_ROW, column=5).value = "Parent SKU"
+        groups = [list(range(8, 19))]
+        # parent
+        ws.cell(row=8, column=1).value = "XL810Z-1"
+        # 子体
+        for i, r in enumerate(groups[0][1:], 1):
+            ws.cell(row=r, column=1).value = f"XL810ZP-{i}"
+        write_parent_sku_formulas(ws, groups, parent_sku_col=5, seller_sku_col=1, mode="new")
+        # parent 行 Parent SKU 为空
+        assert ws.cell(row=8, column=5).value is None
+        # 第 1 个子体 = =A8 (引用 parent 的 Seller SKU)
+        assert ws.cell(row=9, column=5).value == "=A8"
+        # 后续子体 = =E{prev} (引用上一行 Parent SKU, 链式)
+        assert ws.cell(row=10, column=5).value == "=E9"
+        assert ws.cell(row=18, column=5).value == "=E17"
+
+
+# ===== old_parent 模式无 wood/gold 报错 =====
+
+class TestOldParentNoVariantRaises:
+    """old_parent 模式 (与 old_variant 一致) 无 wood/gold 时应报错。"""
+
+    def test_old_parent_no_variant_raises(self, tmp_path):
+        from amazon_excel_processor.merger import merge_files
+        main_wb, _ = _create_main_workbook(["Art A"])
+        main_p = tmp_path / "main.xlsx"
+        main_wb.save(str(main_p))
+        with pytest.raises(ValueError, match="老品模式"):
+            merge_files(main_path=main_p, wood_path=None, gold_path=None,
+                        sku_prefix="T", mode="old_parent")
+
+
+# ===== square 合并模式 =====
+
+class TestSquareMergeMode:
+    """合并模式支持正方形 (square) 画作。
+
+    square 检测: main 文件 Size 列预填 L==W (如 12x12) → ratio_type="square"
+    square 行为: Product Name 用 SIZES_SQUARE, Length/Width 用正方形尺寸序列
+    """
+
+    def test_square_merge_uses_square_sizes(self, tmp_path):
+        """square 画作合并: Product Name 和 Length/Width 用正方形尺寸。"""
+        from amazon_excel_processor.merger import merge_files
+        main_wb, col_map = _create_main_workbook(["Art A"])
+        main_ws = main_wb.active
+        # 在 main 文件 Size 列预填正方形值, 触发 square 检测
+        size_col = col_map["Size"]  # 56
+        square_sizes = ["12x12", "16x16", "20x20", "24x24", "28x28"]
+        # main 的 10 个子体 (row 9-18)
+        for i in range(10):
+            main_ws.cell(row=DATA_START_ROW + 1 + i, column=size_col).value = square_sizes[i % 5]
+
+        wood_wb = _create_variant_workbook(["Art A"], role="wood")
+        main_p = tmp_path / "main.xlsx"
+        wood_p = tmp_path / "wood.xlsx"
+        main_wb.save(str(main_p))
+        wood_wb.save(str(wood_p))
+
+        out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
+                          sku_prefix="T", mode="new")
+
+        # 重新加载验证 (16 行: parent + Frame×5 + Unframe×5 + Wood×5)
+        wb = load_workbook(str(out))
+        ws = wb["Template"]
+        # row 9 = Frame 第1个: Product Name 应含 12x12inch (square 尺寸)
+        assert "12x12inch" in str(ws.cell(row=9, column=7).value)
+        # row 10 = Frame 第2个: 16x16inch
+        assert "16x16inch" in str(ws.cell(row=10, column=7).value)
+        # Length 列 (col 124) = 正方形值 12, 16, 20, 24, 28
+        assert ws.cell(row=9, column=124).value == 12
+        assert ws.cell(row=10, column=124).value == 16
+        # Width 列 (col 126) = 正方形值 (L==W)
+        assert ws.cell(row=9, column=126).value == 12
+        assert ws.cell(row=10, column=126).value == 16
+        # Wood 行 (row 19-23) 也用正方形尺寸
+        assert "12x12inch" in str(ws.cell(row=19, column=7).value)
+        assert ws.cell(row=19, column=124).value == 12
+        assert ws.cell(row=19, column=126).value == 12
+
+    def test_32_merge_uses_32_sizes(self, tmp_path):
+        """3:2 画作合并 (回归): Product Name 和 Length/Width 用 3:2 尺寸。"""
+        from amazon_excel_processor.merger import merge_files
+        main_wb, col_map = _create_main_workbook(["Art A"])
+        main_ws = main_wb.active
+        # Size 列预填 3:2 值 (L != W)
+        size_col = col_map["Size"]
+        size_32 = ["12x08", "18x12", "24x16", "30x20", "36x24"]
+        for i in range(10):
+            main_ws.cell(row=DATA_START_ROW + 1 + i, column=size_col).value = size_32[i % 5]
+
+        wood_wb = _create_variant_workbook(["Art A"], role="wood")
+        main_p = tmp_path / "main.xlsx"
+        wood_p = tmp_path / "wood.xlsx"
+        main_wb.save(str(main_p))
+        wood_wb.save(str(wood_p))
+
+        out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
+                          sku_prefix="T", mode="new")
+
+        wb = load_workbook(str(out))
+        ws = wb["Template"]
+        # row 9 = Frame 第1个: 3:2 尺寸 08x12inch
+        assert "08x12inch" in str(ws.cell(row=9, column=7).value)
+        # Length = 12 (3:2 的 _STYLE_LENGTH[0])
+        assert ws.cell(row=9, column=124).value == 12
+        # Width = 8 (3:2 的 _STYLE_WIDTH[0])
+        assert ws.cell(row=9, column=126).value == 8
+
+    def test_mixed_square_and_32_merge(self, tmp_path):
+        """混合: 一幅 square 一幅 3:2, 各自用对应尺寸。"""
+        from amazon_excel_processor.merger import merge_files
+        main_wb, col_map = _create_main_workbook(["Square Art", "Wide Art"])
+        main_ws = main_wb.active
+        size_col = col_map["Size"]
+        # 第1幅 (Square Art, row 8-18): square
+        square_sizes = ["12x12", "16x16", "20x20", "24x24", "28x28"]
+        for i in range(10):
+            main_ws.cell(row=9 + i, column=size_col).value = square_sizes[i % 5]
+        # 第2幅 (Wide Art, row 19-29): 3:2
+        size_32 = ["12x08", "18x12", "24x16", "30x20", "36x24"]
+        for i in range(10):
+            main_ws.cell(row=20 + i, column=size_col).value = size_32[i % 5]
+
+        wood_wb = _create_variant_workbook(["Square Art", "Wide Art"], role="wood")
+        main_p = tmp_path / "main.xlsx"
+        wood_p = tmp_path / "wood.xlsx"
+        main_wb.save(str(main_p))
+        wood_wb.save(str(wood_p))
+
+        out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
+                          sku_prefix="T", mode="new")
+
+        wb = load_workbook(str(out))
+        ws = wb["Template"]
+        # 第1幅 (16行, row 8-23): square
+        assert "12x12inch" in str(ws.cell(row=9, column=7).value)
+        assert ws.cell(row=9, column=124).value == 12  # square Length
+        assert ws.cell(row=9, column=126).value == 12  # square Width
+        # 第2幅 (16行, row 24-39): 3:2
+        assert "08x12inch" in str(ws.cell(row=25, column=7).value)
+        assert ws.cell(row=25, column=124).value == 12  # 3:2 Length
+        assert ws.cell(row=25, column=126).value == 8   # 3:2 Width

@@ -7,42 +7,6 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 logger = logging.getLogger(__name__)
 
-COLOR_SEQUENCE = [
-    "",
-    "Frame-style", "Frame-style", "Frame-style", "Frame-style", "Frame-style",
-    "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style", "Unframe-style",
-]
-
-SIZE_MAP_SEQUENCE = [
-    "",
-    "X-Small", "Small", "Medium", "Large", "X-Large",
-    "X-Small", "Small", "Medium", "Large", "X-Large",
-]
-
-SIZE_32 = [
-    "",
-    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
-    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
-]
-
-SIZE_SQUARE = [
-    "",
-    "12L''x12W''", "16L''x16W''", "20L''x20W''", "24L''x24W''", "28L''x28W''",
-    "12L''x12W''", "16L''x16W''", "20L''x20W''", "24L''x24W''", "28L''x28W''",
-]
-
-LENGTH_32 = ["", 20, 30, 40, 50, 60, 20, 30, 40, 50, 60]
-LENGTH_SQUARE = ["", 30, 40, 50, 60, 70, 30, 40, 50, 60, 70]
-
-WIDTH_32 = ["", 30, 45, 60, 75, 90, 30, 45, 60, 75, 90]
-# 正方形：两边相等，Width 与 Length 一致
-WIDTH_SQUARE = ["", 30, 40, 50, 60, 70, 30, 40, 50, 60, 70]
-
-WEIGHT_SEQUENCE = ["", 0.18, 0.28, 0.48, 0.68, 0.88, 0.02, 0.04, 0.07, 0.15, 0.25]
-
-# 固定价格表（3:2 和正方形通用）：parent 空，5 Frame + 5 Unframe
-PRICE_SEQUENCE = ["", 19.9, 29.9, 45, 75, 99, 11.9, 14.9, 19.9, 24.9, 34.9]
-
 # ===== 合并模式 21 元素序列 =====
 # 结构: [parent, Frame×5, Unframe×5, VintageWood×5, VintageOrnate×5]
 # Wood 和 Gold 的 Size/SizeMap/Length/Width/Weight 与 Frame×5 一致
@@ -147,13 +111,15 @@ PRICE_SEQUENCE_21 = [
 
 # 所有 style 共享的 5 尺寸值 (新格式, 英寸)
 _STYLE_SIZE_MAP = ["X-Small", "Small", "Medium", "Large", "X-Large"]
+# 3:2 比例
 _STYLE_SIZE_32 = ["12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''"]
-# 新格式: Length (Item Length Longer Edge) = 英寸 [12, 18, 24, 30, 36]
 _STYLE_LENGTH = [12, 18, 24, 30, 36]
-# 新格式: Width (Item Width Shorter Edge) = 英寸 [8, 12, 16, 20, 24]
 _STYLE_WIDTH = [8, 12, 16, 20, 24]
-# edge 序列与 Length 一致 (同列 col124)
-_STYLE_EDGE = [12, 18, 24, 30, 36]
+# 正方形比例 (L == W)
+_STYLE_SIZE_SQUARE = ["12L''x12W''", "16L''x16W''", "20L''x20W''", "24L''x24W''", "28L''x28W''"]
+_STYLE_LENGTH_SQUARE = [12, 16, 20, 24, 28]
+_STYLE_WIDTH_SQUARE = [12, 16, 20, 24, 28]
+# edge 序列已废弃: Style 列保留原始值, 不再填充 (Length 列即 Longer Edge)
 
 STYLE_SPECS = {
     "frame": {
@@ -214,14 +180,28 @@ def build_active_styles(has_wood: bool, has_gold: bool) -> list:
     return styles
 
 
-def _build_sequences(active_styles: list) -> dict:
+def _build_sequences(active_styles: list, ratio_type: str = "3:2") -> dict:
     """根据 active_styles 构建各字段的逐行序列 (含 parent 行占位).
 
+    Args:
+        active_styles: 参与的 style 列表 (如 ["frame","unframe","wood"])
+        ratio_type: "3:2" 或 "square", 决定 Size/Length/Width 用哪套尺寸
+
     返回 dict, 每个序列长度 = 1 + 5*len(active_styles):
-      color / size_map / size_32 / length / width / weight / price / edge / labels
+      color / size_map / size_32 / length / width / weight / price / labels
     parent 行: color="", size_map="", size_32="", length="", width="",
-              weight="", price="", edge=1, labels=None
+              weight="", price="", labels=None
     """
+    # 按比例选择尺寸序列
+    if ratio_type == "square":
+        size_seq = _STYLE_SIZE_SQUARE
+        length_seq = _STYLE_LENGTH_SQUARE
+        width_seq = _STYLE_WIDTH_SQUARE
+    else:
+        size_seq = _STYLE_SIZE_32
+        length_seq = _STYLE_LENGTH
+        width_seq = _STYLE_WIDTH
+
     seqs = {
         "color": [""],
         "size_map": [""],
@@ -230,7 +210,6 @@ def _build_sequences(active_styles: list) -> dict:
         "width": [""],
         "weight": [1],
         "price": [""],
-        "edge": [1],
         "labels": [None],
         # Shipping (Package)
         "package_length": [""],
@@ -243,32 +222,17 @@ def _build_sequences(active_styles: list) -> dict:
         label = spec["label"]
         seqs["color"].extend([label] * 5)
         seqs["size_map"].extend(_STYLE_SIZE_MAP)
-        seqs["size_32"].extend(_STYLE_SIZE_32)
-        seqs["length"].extend(_STYLE_LENGTH)
-        seqs["width"].extend(_STYLE_WIDTH)
+        seqs["size_32"].extend(size_seq)
+        seqs["length"].extend(length_seq)
+        seqs["width"].extend(width_seq)
         seqs["weight"].extend(spec["weight"])
         seqs["price"].extend(spec["price"])
-        seqs["edge"].extend(_STYLE_EDGE)
         seqs["labels"].extend([label] * 5)
         seqs["package_length"].extend(spec["package_length"])
         seqs["package_width"].extend(spec["package_width"])
         seqs["package_height"].extend(spec["package_height"])
         seqs["package_weight"].extend(spec["package_weight"])
     return seqs
-
-
-def fill_list_price(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-) -> None:
-    """List Price 列与 Your Price 列同步填相同值 (合并输出要求)。"""
-    if "List Price" not in col_map or "Your Price" not in col_map:
-        return
-    list_col = col_map["List Price"]
-    price_col = col_map["Your Price"]
-    for row in rows:
-        ws.cell(row=row, column=list_col).value = ws.cell(row=row, column=price_col).value
 
 
 def fill_group_merged(
@@ -287,7 +251,7 @@ def fill_group_merged(
       - Weight 列 (col147) 单位克
       - Style (col46) 填 style 标签
     """
-    seqs = _build_sequences(active_styles)
+    seqs = _build_sequences(active_styles, ratio_type)
 
     # 简单字段 (全组相同): 新格式 Variation Theme Name (col6) = "COLOR/SIZE"
     simple_fills = {
@@ -312,7 +276,7 @@ def fill_group_merged(
     _fill_seq(ws, rows, col_map, "Item Weight", seqs["weight"])
     # 新格式: List Price (col154) 就是价格列, 直接填价格 (无 Your Price 同步)
     _fill_seq(ws, rows, col_map, "List Price", seqs["price"])
-    _fill_seq(ws, rows, col_map, "Style", seqs["color"])
+    # 注意: Style 列保留原始值, 不覆盖 (Color 列才填 style 标签)
 
     # Shipping (Package) 字段填充
     _fill_seq(ws, rows, col_map, "Item Package Length", seqs["package_length"])
@@ -336,6 +300,9 @@ def fill_group_merged(
     if "Package Weight Unit" in col_map:
         _fill_const(ws, rows, col_map["Package Weight Unit"], "Kilograms")
 
+    # Search Terms: 下划线替换为空格 (与老品模式 _fill_variant_fields 保持一致)
+    clean_search_terms(ws, rows, col_map)
+
 
 def _fill_const(ws, rows, col_idx, value):
     """填充所有行为同一个常量值."""
@@ -350,21 +317,6 @@ def _fill_seq(ws, rows, col_map, field_name, sequence):
     col_idx = col_map[field_name]
     for i, row in enumerate(rows):
         ws.cell(row=row, column=col_idx).value = sequence[i]
-
-
-def fill_group_21(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-    ratio_type: str,
-) -> None:
-    """[向后兼容] 21 行合并产品组填充 (假设 wood+gold 都在)。
-
-    等价于 fill_group_merged(..., active_styles=[frame,unframe,wood,gold])。
-    新代码应直接调用 fill_group_merged 并传入实际 active_styles。
-    """
-    fill_group_merged(ws, rows, col_map, ratio_type,
-                      build_active_styles(has_wood=True, has_gold=True))
 
 
 def detect_ratio_type(
@@ -396,130 +348,6 @@ def detect_ratio_type(
     return "3:2"
 
 
-def fill_simple_fields(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-) -> None:
-    """批量填充简单字段：Variation Theme, Paint Type, Color Map。"""
-    simple_fills = {
-        "Variation Theme": "color-size",
-        "Paint Type": "Oil",
-        "Color Map": "Multi",
-    }
-
-    for field_name, value in simple_fills.items():
-        if field_name not in col_map:
-            continue
-        col_idx = col_map[field_name]
-        for row in rows:
-            ws.cell(row=row, column=col_idx).value = value
-
-
-def fill_color(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-) -> None:
-    """按 11 行组填充 Color 列。"""
-    if "Color" not in col_map:
-        return
-    col_idx = col_map["Color"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = COLOR_SEQUENCE[i]
-
-
-def fill_size(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-    ratio_type: str,
-) -> None:
-    """按比例类型填充 Size 列。
-
-    正方形组的 Size 列由用户预填，不覆盖；3:2 组填 SIZE_32。
-    """
-    if "Size" not in col_map:
-        return
-    if ratio_type == "square":
-        return  # 正方形：保留用户预填值，不覆盖
-    col_idx = col_map["Size"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = SIZE_32[i]
-
-
-def fill_size_map(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-) -> None:
-    """填充 Size Map 列。"""
-    if "Size Map" not in col_map:
-        return
-    col_idx = col_map["Size Map"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = SIZE_MAP_SEQUENCE[i]
-
-
-def fill_length(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-    ratio_type: str,
-) -> None:
-    """按比例类型填充 Length 列。"""
-    if "Length" not in col_map:
-        return
-    col_idx = col_map["Length"]
-    sequence = LENGTH_SQUARE if ratio_type == "square" else LENGTH_32
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = sequence[i]
-
-
-def fill_width(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-    ratio_type: str,
-) -> None:
-    """按比例类型填充 Width 列。
-
-    3:2：填宽度值；正方形：两边相等，Width 与 Length 一致。
-    """
-    if "Width" not in col_map:
-        return
-    col_idx = col_map["Width"]
-    sequence = WIDTH_SQUARE if ratio_type == "square" else WIDTH_32
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = sequence[i]
-
-
-def fill_weight(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-) -> None:
-    """填充 Weight 列。"""
-    if "Weight" not in col_map:
-        return
-    col_idx = col_map["Weight"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = WEIGHT_SEQUENCE[i]
-
-
-def fill_price(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-) -> None:
-    """填充 Your Price 列（固定价格表，3:2 和正方形通用）。"""
-    if "Your Price" not in col_map:
-        return
-    col_idx = col_map["Your Price"]
-    for i, row in enumerate(rows):
-        ws.cell(row=row, column=col_idx).value = PRICE_SEQUENCE[i]
-
-
 def clean_search_terms(
     ws: Worksheet,
     rows: list[int],
@@ -533,18 +361,6 @@ def clean_search_terms(
         value = ws.cell(row=row, column=col_idx).value
         if value is not None and isinstance(value, str) and "_" in value:
             ws.cell(row=row, column=col_idx).value = value.replace("_", " ")
-
-
-def fill_item_length_longer_edge(
-    ws: Worksheet,
-    rows: list[int],
-    col_map: dict[str, int],
-) -> None:
-    """只填充 Item Length Longer Edge 的 parent 行（第1行）为 1。"""
-    if "Item Length Longer Edge" not in col_map:
-        return
-    col_idx = col_map["Item Length Longer Edge"]
-    ws.cell(row=rows[0], column=col_idx).value = 1
 
 
 def fill_group(

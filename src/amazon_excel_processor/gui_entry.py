@@ -65,11 +65,11 @@ def _prompt_choice(prompt: str, choices: list) -> str:
         print(f"  请输入 {'/'.join(choices)} 之一")
 
 
-def _run_single(input_path: Path, flog: logging.Logger, template_path: Path | None = None):
+def _run_single(input_path: Path, flog: logging.Logger, sku_prefix: str = ""):
     from amazon_excel_processor.excel_io import load_workbook, locate_columns, group_rows, save_workbook
-    from amazon_excel_processor.excel_io import transfer_to_template
     from amazon_excel_processor.name_normalizer import normalize_group
     from amazon_excel_processor.field_filler import detect_ratio_type, fill_group
+    from amazon_excel_processor.merger import rewrite_sku, write_parent_sku_formulas
 
     def log(msg: str):
         print(msg, flush=True)
@@ -102,15 +102,19 @@ def _run_single(input_path: Path, flog: logging.Logger, template_path: Path | No
         normalize_group(ws, rows, product_name_col, ratio_type)
         fill_group(ws, rows, col_map, ratio_type)
 
+    # SKU 命名 (单文件 = new 模式, 只有 parent + 普通子体, 无木金 J 后缀)
+    if sku_prefix:
+        from amazon_excel_processor.merger import build_sku_prefix
+        prefix = build_sku_prefix(sku_prefix)
+        sku_col = col_map.get("SKU", 1)
+        parent_sku_col = col_map.get("Parent SKU", 5)
+        rewrite_sku(ws, groups, prefix, sku_col=sku_col, mode="new")
+        write_parent_sku_formulas(ws, groups, parent_sku_col=parent_sku_col,
+                                  seller_sku_col=sku_col, mode="new")
+        log(f">> SKU 命名完成: 前缀={prefix} (父体={prefix}-N, 普通子体={prefix}P-N)")
+
     log("\n>> 保存文件...")
-    if template_path is not None:
-        # 搬到模板文件: 保留模板的涂黑/样式, 只覆盖数据 value
-        log(f">> 使用模板: {template_path.name}")
-        output_path = transfer_to_template(ws, template_path)
-        log(f"  已搬运数据到模板: {output_path}")
-    else:
-        output_path = save_workbook(ws, input_path, template_name)
-        log(f"  输出文件: {output_path}")
+    output_path = save_workbook(ws, input_path, template_name)
     flog.info("输出文件: %s", output_path)
 
     log("")
@@ -202,7 +206,7 @@ def main():
     parser.add_argument("--mode", choices=["single", "merge"], help="强制模式 (默认按文件数自动)")
     parser.add_argument("--wood", help="木框文件路径 (合并模式, 可选)")
     parser.add_argument("--gold", help="金框文件路径 (合并模式, 可选)")
-    parser.add_argument("--template", help="模板文件路径 (单文件模式可选, 处理后数据搬运到模板, 保留模板涂黑样式)")
+    parser.add_argument("--sku", help="SKU 命名前缀 (单文件模式, 如 HM725; 不提供则不重写 SKU)")
     args = parser.parse_args()
     interactive = not args.files  # 无命令行参数 = 交互式 GUI 模式
 
@@ -233,20 +237,16 @@ def main():
                 if p.suffix.lower() not in (".xlsx", ".xlsm"):
                     print(f"ERROR: 不支持的文件格式: {p.suffix}")
                     pause_exit(1)
-                # 可选: 模板文件 (处理后数据搬运到模板, 保留模板样式/涂黑)
+                # SKU 前缀 (必填, 与合并模式一致)
                 print()
-                print("  可选: 使用模板文件 (处理后数据搬运到模板, 保留模板涂黑样式)")
-                print("        不填则直接保存到主文件")
-                raw_tpl = _prompt_path("  模板路径 (可选, 直接回车跳过): ")
-                template = None
-                if raw_tpl.strip():
-                    template = Path(raw_tpl.strip())
-                    if not template.exists():
-                        print(f"ERROR: 模板文件不存在: {template}")
-                        pause_exit(1)
+                print("  请输入 SKU 命名 (推荐格式: 店铺名+日期+主题, 如 HM725):")
+                sku_prefix = input("  SKU 命名: ").strip()
+                if not sku_prefix:
+                    print("ERROR: SKU 命名不能为空")
+                    pause_exit(1)
                 flog = _setup_file_logger(p.parent)
-                flog.info("版本: %s, 模式: single, template=%s", VERSION, bool(template))
-                _run_single(p, flog, template)
+                flog.info("版本: %s, 模式: single", VERSION)
+                _run_single(p, flog, sku_prefix=sku_prefix)
                 pause_exit(0)
             else:
                 print()
@@ -314,14 +314,8 @@ def main():
                     print(f"ERROR: 不支持的文件格式: {p.suffix}")
                     sys.exit(1)
                 flog = _setup_file_logger(p.parent)
-                template = None
-                if args.template:
-                    template = Path(_clean_path(args.template))
-                    if not template.exists():
-                        print(f"ERROR: 模板文件不存在: {template}")
-                        sys.exit(1)
-                flog.info("版本: %s, 模式: single (CLI), template=%s", VERSION, bool(template))
-                _run_single(p, flog, template)
+                flog.info("版本: %s, 模式: single (CLI)", VERSION)
+                _run_single(p, flog, sku_prefix=args.sku or "")
     except ValueError as e:
         # 业务错误 (如同名产品重复, 文件类型不符): 给用户清晰提示, traceback 只进 log
         if flog:

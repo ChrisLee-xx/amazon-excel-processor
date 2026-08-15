@@ -30,17 +30,16 @@ from .excel_io import (
 )
 from .field_filler import (
     fill_group_merged,
-    fill_list_price,
     build_active_styles,
     _build_sequences,
     STYLE_SPECS,
+    detect_ratio_type,
 )
 from .name_normalizer import (
     SIZES_32,
+    SIZES_SQUARE,
     extract_base_title,
     remove_numeric_suffix,
-    replace_hyphens,
-    replace_underscores,
     deduplicate_words,
     collapse_spaces,
 )
@@ -353,87 +352,29 @@ def merge_one_painting(
     else:
         raise ValueError(f"未知 mode: {mode}")
 
+    # 把模板单元格样式复制到生成的产品组上
+    # (如 E8 的"涂黑"样式 → 每个 group parent 行的 Parent SKU 列)
+    _apply_template_styles(output_ws, merged_rows, col_map)
+
     return merged_rows
 
 
-# 需要涂黑的列名列表 (Parent 行)
-_PARENT_BLACK_COLUMNS = [
-    "Parent SKU", "Product Id Type", "Product Id", "Package Level",
-    "Color", "Size", "Part Number", "Item Shape", "Theme",
-    "Frame Color", "Frame Material", "Frame Type", "Edition",
-    "Print media", "Paint Type", "Paper Finish", "Is Customizable?",
-    "Item Depth", "Orientation", "Pattern", "Mounting Type",
-    "Finish Type", "Team Name", "Color Family", "Animal Theme",
-    "Item Length Longer Edge", "Item Length Unit",
-    "Item Width Shorter Edge", "Item Width Unit",
-    "Wall Art Form", "Model Variant", "Border Style", "Backing Material",
-    "Border Width", "Border Width Unit", "Border Type", "Color Count",
-    "Number of Packs", "Set Name", "Letter Character",
-    "Government Contract Name", "Government Contract Number",
-    "Collection Item", "Wood Type", "Value", "Item Weight Unit",
-    "List Price",
-    "Fulfillment Channel Code (US)", "Quantity (US)",
-    "Inventory Always Available (US)",
-    "Your Price USD (Sell on Amazon, US)",
-    "Sale Price USD (Sell on Amazon, US)",
-    "Sale Start Date (Sell on Amazon, US)",
-    "Sale End Date (Sell on Amazon, US)",
-    "Your Price USD (Amazon Business (B2B), US)",
-    "Quantity Price Type (Amazon Business (B2B), US)",
-    "Item Package Length", "Package Length Unit",
-    "Item Package Width", "Package Width Unit",
-    "Item Package Height", "Package Height Unit",
-    "Package Weight", "Package Weight Unit",
-]
+def _apply_template_styles(ws, merged_rows, col_map):
+    """把模板中特定单元格的样式复制到合并输出的对应位置.
 
-# 需要涂黑的列名列表 (所有行)
-_ALL_BLACK_COLUMNS = [
-    "Package Contains SKU Quantity", "Package Contains SKU Identifier",
-    "Metal Type", "Athlete",
-]
-
-
-def _apply_template_styles(ws, merged_rows, col_map, template_style=None):
-    """把"涂黑"(绿色填充)样式应用到合并输出的对应位置.
-
-    先重置整个 group 所有单元格为默认样式, 再精确涂色:
-      1. Parent 行涂色: merged_rows[0] 行的 _PARENT_BLACK_COLUMNS 列
-      2. 全组涂色: 所有 merged_rows 行的 _ALL_BLACK_COLUMNS 列
-
-    样式: 固定使用亚马逊模板的绿色标记 (FF4A8915)。
-    template_style 保留用于向后兼容 (若提供则复用其样式)。
+    当前规则:
+    - Parent SKU 列 (col_map["Parent SKU"]): 每个 group 的 parent 行 (merged_rows[0])
+      样式复制自模板的 E8 (用户约定该位置需"涂黑"/深色填充, 提示父体不需要 Parent SKU)。
     """
-    if not merged_rows:
+    from .excel_io import copy_cell_style
+    if "Parent SKU" not in col_map or not merged_rows:
         return
-    from openpyxl.styles import PatternFill
-
+    parent_sku_col = col_map["Parent SKU"]
+    # 模板源单元格: 第 1 个 group 的 Parent 行 Parent SKU 列 (即 DATA_START_ROW 行)
+    template_src = ws.cell(row=DATA_START_ROW, column=parent_sku_col)
     parent_row = merged_rows[0]
-
-    # 先重置全组所有单元格样式 (消除输入文件残留的涂色)
-    for row in merged_rows:
-        for col_idx in col_map.values():
-            ws.cell(row=row, column=col_idx)._style = None
-
-    # 绿色填充 (亚马逊模板标记色)
-    green_fill = PatternFill(patternType='solid', fgColor='FF4A8915')
-
-    def _apply(cell):
-        cell.fill = green_fill
-
-    # 1. Parent 行涂色
-    for col_name in _PARENT_BLACK_COLUMNS:
-        col_idx = col_map.get(col_name)
-        if col_idx is None:
-            continue
-        _apply(ws.cell(row=parent_row, column=col_idx))
-
-    # 2. 全组行涂色
-    for col_name in _ALL_BLACK_COLUMNS:
-        col_idx = col_map.get(col_name)
-        if col_idx is None:
-            continue
-        for row in merged_rows:
-            _apply(ws.cell(row=row, column=col_idx))
+    dst = ws.cell(row=parent_row, column=parent_sku_col)
+    copy_cell_style(template_src, dst)
 
 
 def _extract_base_name_raw(name: str) -> str:
@@ -461,7 +402,7 @@ def _normalize_variant_names(ws, all_rows, variant_rows, name_col, ratio_type="3
     """
     if variant_styles is None:
         variant_styles = ["wood", "gold"]
-    sizes = SIZES_32
+    sizes = SIZES_SQUARE if ratio_type == "square" else SIZES_32
     parent_cell = ws.cell(row=all_rows[0], column=name_col)
     parent_value = parent_cell.value
     if parent_value is None:
@@ -497,7 +438,7 @@ def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2", variant_st
     if variant_styles is None:
         variant_styles = ["wood", "gold"]
     # 构建仅含变体 style 的逐行序列 (去掉 parent 占位 index 0)
-    full = _build_sequences(variant_styles)
+    full = _build_sequences(variant_styles, ratio_type)
     vseq = {k: v[1:] for k, v in full.items()}
 
     def _set(field_name, seq_key):
@@ -515,7 +456,7 @@ def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2", variant_st
     _set("Item Weight", "weight")
     # 新格式: List Price (col154) 就是价格列, 直接填
     _set("List Price", "price")
-    _set("Style", "color")
+    # 注意: Style 列保留原始值, 不覆盖 (Color 列才填 style 标签)
 
     # Shipping (Package) 字段填充
     _set("Item Package Length", "package_length")
@@ -594,7 +535,7 @@ def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=N
     """
     if active_styles is None:
         active_styles = ["frame", "unframe", "wood", "gold"]
-    sizes = SIZES_32
+    sizes = SIZES_SQUARE if ratio_type == "square" else SIZES_32
     parent_cell = ws.cell(row=rows[0], column=name_col)
     parent_value = parent_cell.value
     if parent_value is None:
@@ -747,10 +688,6 @@ def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_
             raise ValueError(f"未知 mode: {mode}, 期望 'new'/'old_variant'/'old_parent'")
 
 
-def fill_list_price_synced(ws, rows, col_map):
-    fill_list_price(ws, rows, col_map)
-
-
 def merge_files(
     main_path,
     wood_path=None,
@@ -781,8 +718,8 @@ def merge_files(
     gold_path = Path(gold_path) if gold_path is not None else None
     has_wood = wood_path is not None
     has_gold = gold_path is not None
-    if mode == "old_variant" and not (has_wood or has_gold):
-        raise ValueError("老品补充变体模式需要至少一个木框或金框文件")
+    if mode in ("old_variant", "old_parent") and not (has_wood or has_gold):
+        raise ValueError("老品模式(补充变体/合并)需要至少一个木框或金框文件")
 
     prefix = build_sku_prefix(sku_prefix)
     logger.info("合并开始: main=%s, wood=%s, gold=%s, prefix=%s, mode=%s",
@@ -833,10 +770,6 @@ def merge_files(
     wood_by_name = index_groups_by_name(wood_ws, wood_groups, name_col, file_label="木框文件") if has_wood else {}
     gold_by_name = index_groups_by_name(gold_ws, gold_groups, name_col, file_label="金框文件") if has_gold else {}
 
-    # 检查配对完整性 (no-op 桩, 实际配对在主循环 pair_counter 处理)
-    _check_pairing(main_by_name, wood_by_name, gold_by_name,
-                   main_ws, wood_ws, gold_ws)
-
     # 关键: 在合并前一次性快照所有 main 行 + 提前算 base name
     snap_cols = [main_ws.max_column]
     if has_wood:
@@ -850,6 +783,10 @@ def merge_files(
         for r in g
     }
     main_base_names = {id(g): _group_base_name(main_ws, g, name_col) for g in main_groups}
+
+    # 在清空前检测每组 ratio_type (清空后 Size 列就没值了)
+    # 合并模式支持 3:2 和 square, 由 main 文件 Size 列预填值决定
+    main_ratio_types = {id(g): detect_ratio_type(main_ws, g, col_map) for g in main_groups}
 
     if mode == "old_parent":
         # 老品合并: 只保留父体 + 金木变体 (不含 Frame/Unframe)
@@ -879,7 +816,9 @@ def merge_files(
         gold_list = gold_by_name.get(name, []) if has_gold else None
         # 文件整体缺失不报错; 只有"文件存在但缺该画"才进 skipped
         if (has_wood and idx >= len(wood_list)) or (has_gold and idx >= len(gold_list)):
-            main_raw = _get_raw_name(main_ws, main_g, name_col)
+            # 注意: main_ws 数据区已被清空, 必须从快照读原始 Product Name
+            main_raw_val = main_all_snapshots.get(main_g[0], {}).get(name_col)
+            main_raw = str(main_raw_val) if main_raw_val else ""
             skipped.append((name, main_raw, idx,
                             len(wood_list) if has_wood else None,
                             len(gold_list) if has_gold else None))
@@ -887,6 +826,7 @@ def merge_files(
         wood_g = wood_list[idx] if has_wood else None
         gold_g = gold_list[idx] if has_gold else None
         main_snapshots = [main_all_snapshots[r] for r in main_g]
+        ratio_type = main_ratio_types.get(id(main_g), "3:2")
         merged = merge_one_painting(
             main_snapshots=main_snapshots,
             wood_group=wood_g,
@@ -897,6 +837,7 @@ def merge_files(
             wood_ws=wood_ws,
             gold_ws=gold_ws,
             max_col=max_col_for_snapshot,
+            ratio_type=ratio_type,
             mode=mode,
             name_col=name_col,
         )
@@ -912,10 +853,6 @@ def merge_files(
     write_parent_sku_formulas(main_ws, new_groups, parent_sku_col=parent_sku_col,
                               seller_sku_col=sku_col, mode=mode)
 
-    # 应用涂黑样式 (每个 group 的 parent 行和全组行)
-    for g in new_groups:
-        _apply_template_styles(main_ws, g, col_map)
-
     out = save_workbook(
         main_ws,
         main_path,
@@ -930,17 +867,6 @@ def _get_raw_name(ws, group, name_col):
     """获取 group parent 行的原始 Product Name."""
     v = ws.cell(row=group[0], column=name_col).value
     return str(v) if v else ""
-
-
-def _check_pairing(main_by_name, wood_by_name, gold_by_name,
-                   main_ws, wood_ws, gold_ws):
-    """预检查: 普文件的 base name 是否都能在木/金文件中找到 (允许同名多 group).
-
-    只在 base name 完全不存在时才警告 (不是每次配对都检查).
-    同名多 group 的按顺序配对在 merge_files 主循环中处理.
-    """
-    # 此函数保留为 no-op, 实际配对检查在 merge_files 主循环中通过 pair_counter 处理
-    pass
 
 
 def _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,

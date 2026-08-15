@@ -8,6 +8,7 @@ from pathlib import Path
 from .excel_io import load_workbook, locate_columns, group_rows, save_workbook
 from .name_normalizer import normalize_group
 from .field_filler import detect_ratio_type, fill_group
+from .merger import rewrite_sku, write_parent_sku_formulas, build_sku_prefix
 
 logger = logging.getLogger("amazon_excel_processor")
 
@@ -18,6 +19,7 @@ def main():
     )
     parser.add_argument("input_file", help="输入 Excel 文件路径 (.xlsx 或 .xlsm)")
     parser.add_argument("-o", "--output", help="输出文件路径（默认: {input}_processed.{ext}）")
+    parser.add_argument("--sku", help="SKU 命名前缀 (如 HM725; 不提供则不重写 SKU)")
     parser.add_argument("-v", "--verbose", action="store_true", help="显示详细日志")
     args = parser.parse_args()
 
@@ -62,6 +64,16 @@ def main():
 
             normalize_group(ws, rows, product_name_col, ratio_type)
             fill_group(ws, rows, col_map, ratio_type)
+
+        # SKU 命名 (单文件 = new 模式, 只有 parent + 普通子体, 无木金 J 后缀)
+        if args.sku:
+            prefix = build_sku_prefix(args.sku)
+            sku_col = col_map.get("SKU", 1)
+            parent_sku_col = col_map.get("Parent SKU", 5)
+            rewrite_sku(ws, groups, prefix, sku_col=sku_col, mode="new")
+            write_parent_sku_formulas(ws, groups, parent_sku_col=parent_sku_col,
+                                      seller_sku_col=sku_col, mode="new")
+            log_print(f">> SKU 命名完成: 前缀={prefix} (父体={prefix}-N, 普通子体={prefix}P-N)")
 
         log_print("")
         log_print(">> 保存文件...")
