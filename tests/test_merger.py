@@ -366,71 +366,112 @@ class TestMergeOnePainting:
 
 class TestRewriteSku:
     def test_continuous_numbering_new_mode(self):
-        """新品上架: 父体={prefix}-N, 普通子体={prefix}P-N, 木金子体={prefix}J-N, 三套独立编号"""
+        """新品上架: 父体={prefix}-N, 普通子体={prefix}P-N, 木框={prefix}W-N, 金框={prefix}J-N, 四套独立编号"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25)), list(range(25, 46))]
-        rewrite_sku(ws, groups, prefix="HM725", mode="new")
+        rewrite_sku(ws, groups, prefix="HM725", mode="new", has_wood=True, has_gold=True)
         # group 1: parent = HM725-1
         assert ws.cell(row=4, column=1).value == "HM725-1"
         # group 1: 普通子体 (r5-r14) = HM725P-1 到 HM725P-10
         assert ws.cell(row=5, column=1).value == "HM725P-1"
         assert ws.cell(row=14, column=1).value == "HM725P-10"
-        # group 1: 木金子体 (r15-r24) = HM725J-1 到 HM725J-10
-        assert ws.cell(row=15, column=1).value == "HM725J-1"
-        assert ws.cell(row=24, column=1).value == "HM725J-10"
+        # group 1: 木框子体 (r15-r19) = HM725W-1 到 HM725W-5
+        assert ws.cell(row=15, column=1).value == "HM725W-1"
+        assert ws.cell(row=19, column=1).value == "HM725W-5"
+        # group 1: 金框子体 (r20-r24) = HM725J-1 到 HM725J-5
+        assert ws.cell(row=20, column=1).value == "HM725J-1"
+        assert ws.cell(row=24, column=1).value == "HM725J-5"
         # group 2: parent = HM725-2
         assert ws.cell(row=25, column=1).value == "HM725-2"
         # group 2: 普通子体 = HM725P-11 到 HM725P-20
         assert ws.cell(row=26, column=1).value == "HM725P-11"
         assert ws.cell(row=35, column=1).value == "HM725P-20"
-        # group 2: 木金子体 = HM725J-11 到 HM725J-20
-        assert ws.cell(row=36, column=1).value == "HM725J-11"
-        assert ws.cell(row=45, column=1).value == "HM725J-20"
+        # group 2: 木框子体 = HM725W-6 到 HM725W-10
+        assert ws.cell(row=36, column=1).value == "HM725W-6"
+        assert ws.cell(row=40, column=1).value == "HM725W-10"
+        # group 2: 金框子体 = HM725J-6 到 HM725J-10
+        assert ws.cell(row=41, column=1).value == "HM725J-6"
+        assert ws.cell(row=45, column=1).value == "HM725J-10"
 
     def test_single_group_new_mode(self):
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25))]
-        rewrite_sku(ws, groups, prefix="AB", mode="new")
+        rewrite_sku(ws, groups, prefix="AB", mode="new", has_wood=True, has_gold=True)
         # parent
         assert ws.cell(row=4, column=1).value == "AB-1"
         # 普通子体
         assert ws.cell(row=5, column=1).value == "ABP-1"
         assert ws.cell(row=14, column=1).value == "ABP-10"
-        # 木金子体
-        assert ws.cell(row=15, column=1).value == "ABJ-1"
-        assert ws.cell(row=24, column=1).value == "ABJ-10"
+        # 木框子体 (r15-r19)
+        assert ws.cell(row=15, column=1).value == "ABW-1"
+        assert ws.cell(row=19, column=1).value == "ABW-5"
+        # 金框子体 (r20-r24)
+        assert ws.cell(row=20, column=1).value == "ABJ-1"
+        assert ws.cell(row=24, column=1).value == "ABJ-5"
+
+    def test_wood_only_uses_W_suffix(self):
+        """只有木框 (无金框) → 木框用 W 后缀, 无 J 行"""
+        wb = Workbook()
+        ws = wb.active
+        groups = [list(range(4, 20))]  # 16 行: parent + 10 普通 + 5 木
+        rewrite_sku(ws, groups, prefix="T", mode="new", has_wood=True, has_gold=False)
+        assert ws.cell(row=4, column=1).value == "T-1"
+        assert ws.cell(row=5, column=1).value == "TP-1"
+        assert ws.cell(row=14, column=1).value == "TP-10"
+        assert ws.cell(row=15, column=1).value == "TW-1"
+        assert ws.cell(row=19, column=1).value == "TW-5"
+
+    def test_gold_only_uses_J_suffix(self):
+        """只有金框 (无木框) → 金框用 J 后缀, 无 W 行"""
+        wb = Workbook()
+        ws = wb.active
+        groups = [list(range(4, 20))]  # 16 行: parent + 10 普通 + 5 金
+        rewrite_sku(ws, groups, prefix="T", mode="new", has_wood=False, has_gold=True)
+        assert ws.cell(row=4, column=1).value == "T-1"
+        assert ws.cell(row=5, column=1).value == "TP-1"
+        assert ws.cell(row=14, column=1).value == "TP-10"
+        assert ws.cell(row=15, column=1).value == "TJ-1"
+        assert ws.cell(row=19, column=1).value == "TJ-5"
 
     def test_old_variant_mode_preserves_main_sku(self):
-        """老品补充变体: group[0:11] (普文件原 11 行) SKU 保留, group[11:21] 重写"""
+        """老品补充变体: group[0:11] (普文件原 11 行) SKU 保留, 木框=W, 金框=J"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25))]
         # 预设普文件原 11 行的 SKU (group[0:11] = r4-r14)
         for i, r in enumerate(groups[0][:11]):
             ws.cell(row=r, column=1).value = f"OLD-{i+1}"
-        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant")
+        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant", has_wood=True, has_gold=True)
         # r4-r14 保留原 SKU
         assert ws.cell(row=4, column=1).value == "OLD-1"
         assert ws.cell(row=14, column=1).value == "OLD-11"
-        # r15-r24 (Wood+Gold) 用新前缀从 1 开始
-        assert ws.cell(row=15, column=1).value == "NEW-1"
-        assert ws.cell(row=16, column=1).value == "NEW-2"
-        assert ws.cell(row=24, column=1).value == "NEW-10"
+        # r15-r19 (Wood) = NEWW-1 到 NEWW-5
+        assert ws.cell(row=15, column=1).value == "NEWW-1"
+        assert ws.cell(row=19, column=1).value == "NEWW-5"
+        # r20-r24 (Gold) = NEWJ-1 到 NEWJ-5
+        assert ws.cell(row=20, column=1).value == "NEWJ-1"
+        assert ws.cell(row=24, column=1).value == "NEWJ-5"
 
     def test_old_variant_mode_multi_groups_continuous(self):
-        """老品补充变体: 多 group 时 Wood/Gold 跨 group 连续编号"""
+        """老品补充变体: 多 group 时 Wood/Gold 各自跨 group 连续编号"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25)), list(range(25, 46))]
-        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant")
-        # group 1: r15-r24 = NEW-1 到 NEW-10
-        assert ws.cell(row=15, column=1).value == "NEW-1"
-        assert ws.cell(row=24, column=1).value == "NEW-10"
-        # group 2: r36-r45 = NEW-11 到 NEW-20
-        assert ws.cell(row=36, column=1).value == "NEW-11"
-        assert ws.cell(row=45, column=1).value == "NEW-20"
+        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant", has_wood=True, has_gold=True)
+        # group 1: r15-r19 (Wood) = NEWW-1 到 NEWW-5
+        assert ws.cell(row=15, column=1).value == "NEWW-1"
+        assert ws.cell(row=19, column=1).value == "NEWW-5"
+        # group 1: r20-r24 (Gold) = NEWJ-1 到 NEWJ-5
+        assert ws.cell(row=20, column=1).value == "NEWJ-1"
+        assert ws.cell(row=24, column=1).value == "NEWJ-5"
+        # group 2: r36-r40 (Wood) = NEWW-6 到 NEWW-10
+        assert ws.cell(row=36, column=1).value == "NEWW-6"
+        assert ws.cell(row=40, column=1).value == "NEWW-10"
+        # group 2: r41-r45 (Gold) = NEWJ-6 到 NEWJ-10
+        assert ws.cell(row=41, column=1).value == "NEWJ-6"
+        assert ws.cell(row=45, column=1).value == "NEWJ-10"
 
 
 # ===== write_parent_sku_formulas =====

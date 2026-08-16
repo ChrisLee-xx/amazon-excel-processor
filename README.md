@@ -21,7 +21,7 @@
 - 普 + 木 + 金 → 21 行（Frame×5 + Unframe×5 + Wood×5 + Gold×5）
 
 **Item Name 格式**：`{画作名} {style标签} {尺寸}`，如
-`Route 66... Decor Vintage Ornate Gold Vintage Wood Grain Frame-style 08x12inch(20x30cm)`
+`Route 66... Decor Vintage Wood Grain Frame-style 08x12inch(20x30cm)`
 
 合并时可选 3 种上架类型：
 - **新品上架**：所有 SKU 重写为 `{前缀}-1, -2, ...`，输出含普内容（Frame+Unframe+变体）
@@ -85,8 +85,13 @@
 - **配对**：按归一化后的 Product Name base name 配对（去 `-数字`、去 Frame-/Unframe-、替换 `-` 为空格、转小写）。文件整体缺失则跳过该变体；文件存在但缺某画则报错（带模糊匹配候选）
 - **输出顺序**：Frame-style → Unframe-style → Vintage Wood Grain Frame-style（若提供木）→ Vintage Ornate Gold Frame-style（若提供金）
 - **上架类型**：
-  - **新品上架**：全部行 × N 画 SKU 从 `{前缀}-1` 开始连续编号，所有 parent SKU 公式重写
-  - **老品补充变体**：普文件原 11 行（parent + Frame×5 + Unframe×5）SKU 和 parent SKU 公式保留不变；新增的变体行（Wood×5 和/或 Gold×5）SKU 从 `{前缀}-1` 开始连续编号，parent SKU 公式从 `=AA{prev_unframe_last}` 开始链式引用
+  - **新品上架**：全部行 × N 画 SKU 重写，parent SKU 公式重写
+  - **老品补充变体**：普文件原 11 行（parent + Frame×5 + Unframe×5）SKU 和 parent SKU 公式保留不变；新增的变体行（Wood×5 和/或 Gold×5）SKU 重写，parent SKU 公式从 `=AA{prev_unframe_last}` 开始链式引用
+- **SKU 后缀规则**（各套编号各自独立连续，跨 group 不重置）：
+  - parent → `{前缀}-N`（如 `HM725-1`）
+  - Frame/Unframe（普通子体）→ `{前缀}P-N`（如 `HM725P-1`）
+  - Wood（木框子体）→ `{前缀}W-N`（如 `HM725W-1`）
+  - Gold（金框子体）→ `{前缀}J-N`（如 `HM725J-1`）
 - **Parent SKU 公式规则**：
   - 新品上架：parent 行清空，第 1 个 child `=B{parent_row}`，后续 `=AA{prev_row}`
   - 老品补充变体：普文件原 11 行保留，新增变体行从 `=AA{unframe_last_row}` 开始链式
