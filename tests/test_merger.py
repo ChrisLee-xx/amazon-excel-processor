@@ -973,3 +973,148 @@ class TestSquareMergeMode:
         assert "08x12inch" in str(ws.cell(row=25, column=7).value)
         assert ws.cell(row=25, column=124).value == 12  # 3:2 Length
         assert ws.cell(row=25, column=126).value == 8   # 3:2 Width
+
+
+# ===== cleanup_for_upload (亚马逊上传前清理) =====
+
+class TestCleanupForUpload:
+    """验证 save_workbook 自动清理会导致亚马逊上传失败的字段。
+
+    基于真实文件对比:
+      - 成功文件 XL817塔罗杂普: Package Contains 全空, Parent 行包装尺寸全空
+      - 失败文件 ZJM817旅游普: Package Contains 全填 1, Parent 行包装尺寸填 1
+        → 导致 8007 (父体创建失败) + 990100 (package_contains 关系未批准) + 13013 (子体找不到父体)
+    """
+
+    def _make_wb_with_package_fields(self):
+        """构造含 Package 字段的 workbook: 1 parent + 2 children。"""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Template"
+        headers = {
+            1: "SKU", 4: "Parentage Level",
+            13: "Package Level",
+            14: "Package Contains SKU Quantity",
+            15: "Package Contains SKU Identifier",
+            208: "Item Package Length", 209: "Package Length Unit",
+            210: "Item Package Width", 211: "Package Width Unit",
+            212: "Item Package Height", 213: "Package Height Unit",
+            214: "Package Weight", 215: "Package Weight Unit",
+        }
+        for c, h in headers.items():
+            ws.cell(row=4, column=c).value = h
+        # parent (row 8)
+        ws.cell(row=8, column=1).value = "P-1"
+        ws.cell(row=8, column=4).value = "Parent"
+        ws.cell(row=8, column=13).value = "Unit"
+        ws.cell(row=8, column=14).value = 1  # 失败文件: 填了
+        ws.cell(row=8, column=15).value = 1
+        ws.cell(row=8, column=208).value = 1
+        ws.cell(row=8, column=209).value = "Centimeters"
+        ws.cell(row=8, column=210).value = 1
+        ws.cell(row=8, column=211).value = "Centimeters"
+        ws.cell(row=8, column=212).value = 1
+        ws.cell(row=8, column=213).value = "Centimeters"
+        ws.cell(row=8, column=214).value = 1
+        ws.cell(row=8, column=215).value = "Kilograms"
+        # child 1 (row 9)
+        ws.cell(row=9, column=1).value = "P-1-1"
+        ws.cell(row=9, column=4).value = "Child"
+        ws.cell(row=9, column=13).value = "Unit"
+        ws.cell(row=9, column=14).value = 1  # 失败文件: 填了
+        ws.cell(row=9, column=15).value = 1
+        ws.cell(row=9, column=208).value = 30  # 子体包装尺寸应保留
+        ws.cell(row=9, column=209).value = "Centimeters"
+        ws.cell(row=9, column=210).value = 20
+        ws.cell(row=9, column=211).value = "Centimeters"
+        ws.cell(row=9, column=212).value = 1
+        ws.cell(row=9, column=213).value = "Centimeters"
+        ws.cell(row=9, column=214).value = 0.18
+        ws.cell(row=9, column=215).value = "Kilograms"
+        # child 2 (row 10)
+        ws.cell(row=10, column=1).value = "P-1-2"
+        ws.cell(row=10, column=4).value = "Child"
+        ws.cell(row=10, column=13).value = "Unit"
+        ws.cell(row=10, column=14).value = 1
+        ws.cell(row=10, column=15).value = 1
+        ws.cell(row=10, column=208).value = 45
+        ws.cell(row=10, column=209).value = "Centimeters"
+        return wb
+
+    def test_package_contains_cleared_on_all_rows(self):
+        """Package Contains SKU Quantity/Identifier 在所有行 (Parent+Child) 都被清空。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = self._make_wb_with_package_fields()
+        ws = wb["Template"]
+        # 清理前: 都有值
+        assert ws.cell(row=8, column=14).value == 1  # parent
+        assert ws.cell(row=9, column=14).value == 1  # child
+        cleanup_for_upload(ws)
+        # 清理后: 全部为 None
+        assert ws.cell(row=8, column=14).value is None  # parent
+        assert ws.cell(row=8, column=15).value is None
+        assert ws.cell(row=9, column=14).value is None  # child
+        assert ws.cell(row=9, column=15).value is None
+        assert ws.cell(row=10, column=14).value is None
+        assert ws.cell(row=10, column=15).value is None
+
+    def test_parent_package_dimensions_cleared(self):
+        """Parent 行的包装尺寸 (Length/Width/Height/Weight + Unit) 被清空。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = self._make_wb_with_package_fields()
+        ws = wb["Template"]
+        cleanup_for_upload(ws)
+        # parent (row 8): 包装尺寸全空
+        for c in [208, 209, 210, 211, 212, 213, 214, 215]:
+            assert ws.cell(row=8, column=c).value is None, f"col{c} 应被清空"
+
+    def test_child_package_dimensions_preserved(self):
+        """Child 行的包装尺寸保留 (子体有实际尺寸)。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = self._make_wb_with_package_fields()
+        ws = wb["Template"]
+        cleanup_for_upload(ws)
+        # child 1 (row 9): 包装尺寸保留
+        assert ws.cell(row=9, column=208).value == 30
+        assert ws.cell(row=9, column=209).value == "Centimeters"
+        assert ws.cell(row=9, column=210).value == 20
+        assert ws.cell(row=9, column=214).value == 0.18
+        assert ws.cell(row=9, column=215).value == "Kilograms"
+
+    def test_package_level_preserved(self):
+        """Package Level (col13) 不被清理, 保持 'Unit'。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = self._make_wb_with_package_fields()
+        ws = wb["Template"]
+        cleanup_for_upload(ws)
+        assert ws.cell(row=8, column=13).value == "Unit"
+        assert ws.cell(row=9, column=13).value == "Unit"
+
+    def test_save_workbook_invokes_cleanup(self, tmp_path):
+        """save_workbook 保存时自动调用清理, 输出文件中 Package Contains 已清空。"""
+        wb = self._make_wb_with_package_fields()
+        ws = wb["Template"]
+        from amazon_excel_processor.excel_io import save_workbook
+        out = save_workbook(ws, tmp_path / "input.xlsx", "Template")
+        wb2 = load_workbook(str(out))
+        ws2 = wb2["Template"]
+        # Package Contains 已清空
+        assert ws2.cell(row=8, column=14).value is None
+        assert ws2.cell(row=9, column=14).value is None
+        # Parent 包装尺寸已清空
+        assert ws2.cell(row=8, column=208).value is None
+        # Child 包装尺寸保留
+        assert ws2.cell(row=9, column=208).value == 30
+
+    def test_no_package_columns_no_error(self):
+        """模板没有 Package 列时不报错 (静默跳过)。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Template"
+        ws.cell(row=4, column=1).value = "SKU"
+        ws.cell(row=4, column=4).value = "Parentage Level"
+        ws.cell(row=8, column=1).value = "P-1"
+        ws.cell(row=8, column=4).value = "Parent"
+        # 不应抛异常
+        cleanup_for_upload(ws)

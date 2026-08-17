@@ -222,13 +222,95 @@ def save_workbook(
     output_path: Optional[str | Path] = None,
     suffix: str = "_processed",
 ):
-    """保存 worksheet 为新的 Excel 文件，保留 VBA 宏。"""
+    """保存 worksheet 为新的 Excel 文件，保留 VBA 宏。
+
+    保存前自动调用 cleanup_for_upload 清理会导致亚马逊上传失败的字段。
+    """
+    cleanup_for_upload(ws)
     input_path = Path(input_path)
     wb = ws.parent
     out = _resolve_output_path(input_path, Path(output_path) if output_path else None, suffix=suffix)
     wb.save(str(out))
     logger.info("保存文件: %s", out)
     return out
+
+
+# 亚马逊上传时会导致错误的字段 (需在保存前清空)
+# Package Contains 字段仅用于套装商品, 普通单品填了会导致 8007/990100 错误
+_CLEANUP_COLUMNS_BOTH = [
+    "Package Contains SKU Quantity",
+    "Package Contains SKU Identifier",
+]
+# Parent 行 (虚拟父体) 不应有实际包装尺寸, 只有 Child 行才保留
+_CLEANUP_COLUMNS_PARENT_ONLY = [
+    "Item Package Length",
+    "Package Length Unit",
+    "Item Package Width",
+    "Package Width Unit",
+    "Item Package Height",
+    "Package Height Unit",
+    "Package Weight",
+    "Package Weight Unit",
+]
+
+
+def _find_col_by_header(ws: Worksheet, header_name: str, header_row: int = HEADER_ROW) -> int:
+    """按列名查找列号 (不依赖 col_map), 找不到返回 0。"""
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(row=header_row, column=c).value
+        if v is not None and str(v).strip().lower() == header_name.lower():
+            return c
+    return 0
+
+
+def cleanup_for_upload(ws: Worksheet) -> None:
+    """清理会导致亚马逊上传失败的字段。
+
+    规则 (基于成功上传文件 XL817塔罗杂普_processed 与失败文件 ZJM817旅游普_processed 的对比):
+      1. Package Contains SKU Quantity / Identifier (col14/15):
+         全部行清空 (Parent + Child)。这两个字段仅用于套装商品,
+         普通单品填了会导致 990100 警告 + 8007 父体创建失败。
+      2. Parent 行的 Item Package Length/Width/Height/Weight + 对应 Unit (col208-215):
+         全部 Parent 行清空。虚拟父体没有实际包装尺寸, 只有 Child 子体才保留。
+    """
+    # 1. 全部行: 清空 Package Contains 字段
+    cols_both = [_find_col_by_header(ws, n) for n in _CLEANUP_COLUMNS_BOTH]
+    cols_both = [c for c in cols_both if c > 0]
+
+    # 2. 仅 Parent 行: 清空包装尺寸字段
+    cols_parent = [_find_col_by_header(ws, n) for n in _CLEANUP_COLUMNS_PARENT_ONLY]
+    cols_parent = [c for c in cols_parent if c > 0]
+
+    if not cols_both and not cols_parent:
+        return  # 模板里没这些列, 无需清理
+
+    parentage_col = _find_col_by_header(ws, "Parentage Level")
+    if parentage_col == 0:
+        parentage_col = 4  # 默认列号
+
+    cleaned_both = 0
+    cleaned_parent = 0
+    for r in range(DATA_START_ROW, ws.max_row + 1):
+        parentage = ws.cell(row=r, column=parentage_col).value
+        if parentage is None or str(parentage).strip() == "":
+            continue  # 非数据行
+
+        # 清空 Package Contains (所有数据行)
+        for c in cols_both:
+            if ws.cell(row=r, column=c).value is not None:
+                ws.cell(row=r, column=c).value = None
+                cleaned_both += 1
+
+        # 清空 Parent 行的包装尺寸
+        if str(parentage).strip().lower() == "parent":
+            for c in cols_parent:
+                if ws.cell(row=r, column=c).value is not None:
+                    ws.cell(row=r, column=c).value = None
+                    cleaned_parent += 1
+
+    if cleaned_both or cleaned_parent:
+        logger.info("cleanup_for_upload: 清空 Package Contains %d 格, Parent 包装尺寸 %d 格",
+                    cleaned_both, cleaned_parent)
 
 
 def copy_cell_style(src_cell, dst_cell) -> None:
