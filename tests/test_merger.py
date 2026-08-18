@@ -376,9 +376,9 @@ class TestRewriteSku:
         # group 1: 普通子体 (r5-r14) = HM725P-1 到 HM725P-10
         assert ws.cell(row=5, column=1).value == "HM725P-1"
         assert ws.cell(row=14, column=1).value == "HM725P-10"
-        # group 1: 木框子体 (r15-r19) = HM725W-1 到 HM725W-5
-        assert ws.cell(row=15, column=1).value == "HM725W-1"
-        assert ws.cell(row=19, column=1).value == "HM725W-5"
+        # group 1: 木框子体 (r15-r19) = HM725M-1 到 HM725M-5
+        assert ws.cell(row=15, column=1).value == "HM725M-1"
+        assert ws.cell(row=19, column=1).value == "HM725M-5"
         # group 1: 金框子体 (r20-r24) = HM725J-1 到 HM725J-5
         assert ws.cell(row=20, column=1).value == "HM725J-1"
         assert ws.cell(row=24, column=1).value == "HM725J-5"
@@ -387,9 +387,9 @@ class TestRewriteSku:
         # group 2: 普通子体 = HM725P-11 到 HM725P-20
         assert ws.cell(row=26, column=1).value == "HM725P-11"
         assert ws.cell(row=35, column=1).value == "HM725P-20"
-        # group 2: 木框子体 = HM725W-6 到 HM725W-10
-        assert ws.cell(row=36, column=1).value == "HM725W-6"
-        assert ws.cell(row=40, column=1).value == "HM725W-10"
+        # group 2: 木框子体 = HM725M-6 到 HM725M-10
+        assert ws.cell(row=36, column=1).value == "HM725M-6"
+        assert ws.cell(row=40, column=1).value == "HM725M-10"
         # group 2: 金框子体 = HM725J-6 到 HM725J-10
         assert ws.cell(row=41, column=1).value == "HM725J-6"
         assert ws.cell(row=45, column=1).value == "HM725J-10"
@@ -405,14 +405,14 @@ class TestRewriteSku:
         assert ws.cell(row=5, column=1).value == "ABP-1"
         assert ws.cell(row=14, column=1).value == "ABP-10"
         # 木框子体 (r15-r19)
-        assert ws.cell(row=15, column=1).value == "ABW-1"
-        assert ws.cell(row=19, column=1).value == "ABW-5"
+        assert ws.cell(row=15, column=1).value == "ABM-1"
+        assert ws.cell(row=19, column=1).value == "ABM-5"
         # 金框子体 (r20-r24)
         assert ws.cell(row=20, column=1).value == "ABJ-1"
         assert ws.cell(row=24, column=1).value == "ABJ-5"
 
-    def test_wood_only_uses_W_suffix(self):
-        """只有木框 (无金框) → 木框用 W 后缀, 无 J 行"""
+    def test_wood_only_uses_M_suffix(self):
+        """只有木框 (无金框) → 木框用 M 后缀, 无 J 行"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 20))]  # 16 行: parent + 10 普通 + 5 木
@@ -420,8 +420,8 @@ class TestRewriteSku:
         assert ws.cell(row=4, column=1).value == "T-1"
         assert ws.cell(row=5, column=1).value == "TP-1"
         assert ws.cell(row=14, column=1).value == "TP-10"
-        assert ws.cell(row=15, column=1).value == "TW-1"
-        assert ws.cell(row=19, column=1).value == "TW-5"
+        assert ws.cell(row=15, column=1).value == "TM-1"
+        assert ws.cell(row=19, column=1).value == "TM-5"
 
     def test_gold_only_uses_J_suffix(self):
         """只有金框 (无木框) → 金框用 J 后缀, 无 W 行"""
@@ -447,9 +447,9 @@ class TestRewriteSku:
         # r4-r14 保留原 SKU
         assert ws.cell(row=4, column=1).value == "OLD-1"
         assert ws.cell(row=14, column=1).value == "OLD-11"
-        # r15-r19 (Wood) = NEWW-1 到 NEWW-5
-        assert ws.cell(row=15, column=1).value == "NEWW-1"
-        assert ws.cell(row=19, column=1).value == "NEWW-5"
+        # r15-r19 (Wood) = NEWM-1 到 NEWM-5
+        assert ws.cell(row=15, column=1).value == "NEWM-1"
+        assert ws.cell(row=19, column=1).value == "NEWM-5"
         # r20-r24 (Gold) = NEWJ-1 到 NEWJ-5
         assert ws.cell(row=20, column=1).value == "NEWJ-1"
         assert ws.cell(row=24, column=1).value == "NEWJ-5"
@@ -460,15 +460,15 @@ class TestRewriteSku:
         ws = wb.active
         groups = [list(range(4, 25)), list(range(25, 46))]
         rewrite_sku(ws, groups, prefix="NEW", mode="old_variant", has_wood=True, has_gold=True)
-        # group 1: r15-r19 (Wood) = NEWW-1 到 NEWW-5
-        assert ws.cell(row=15, column=1).value == "NEWW-1"
-        assert ws.cell(row=19, column=1).value == "NEWW-5"
+        # group 1: r15-r19 (Wood) = NEWM-1 到 NEWM-5
+        assert ws.cell(row=15, column=1).value == "NEWM-1"
+        assert ws.cell(row=19, column=1).value == "NEWM-5"
         # group 1: r20-r24 (Gold) = NEWJ-1 到 NEWJ-5
         assert ws.cell(row=20, column=1).value == "NEWJ-1"
         assert ws.cell(row=24, column=1).value == "NEWJ-5"
-        # group 2: r36-r40 (Wood) = NEWW-6 到 NEWW-10
-        assert ws.cell(row=36, column=1).value == "NEWW-6"
-        assert ws.cell(row=40, column=1).value == "NEWW-10"
+        # group 2: r36-r40 (Wood) = NEWM-6 到 NEWM-10
+        assert ws.cell(row=36, column=1).value == "NEWM-6"
+        assert ws.cell(row=40, column=1).value == "NEWM-10"
         # group 2: r41-r45 (Gold) = NEWJ-6 到 NEWJ-10
         assert ws.cell(row=41, column=1).value == "NEWJ-6"
         assert ws.cell(row=45, column=1).value == "NEWJ-10"

@@ -601,13 +601,13 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new",
         mode: "new" = 新品上架 (全部行重写)
               "old_variant" = 老品补充变体 (普文件原 11 行 SKU 保留, 变体行重写)
               "old_parent" = 老品合并 (父体 SKU 保留, 金木变体重写)
-        has_wood: 是否有木框变体 (Wood 行用 W 后缀)
+        has_wood: 是否有木框变体 (Wood 行用 M 后缀)
         has_gold: 是否有金框变体 (Gold 行用 J 后缀)
 
     SKU 后缀规则:
         parent       → {prefix}-N      (父体)
         Frame/Unframe→ {prefix}P-N     (普通子体, P=Plain)
-        Wood         → {prefix}W-N     (木框子体, W=Wood)
+        Wood         → {prefix}M-N     (木框子体, M=木)
         Gold         → {prefix}J-N     (金框子体, J=Gold)
     各套编号各自独立连续 (跨 group 不重置)。
 
@@ -628,10 +628,10 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new",
             for i in range(1, min(11, len(group))):
                 ws.cell(row=group[i], column=sku_col).value = f"{prefix}P-{normal_counter}"
                 normal_counter += 1
-            # Wood 行: group[11:16] (若 has_wood) → {prefix}W-{N}
+            # Wood 行: group[11:16] (若 has_wood) → {prefix}M-{N}
             if has_wood:
                 for i in range(11, min(16, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}W-{wood_counter}"
+                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
                     wood_counter += 1
             # Gold 行: group[16:21] (若 has_wood) 或 group[11:16] (若 !has_wood) → {prefix}J-{N}
             if has_gold:
@@ -641,13 +641,13 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new",
                     gold_counter += 1
     elif mode == "old_variant":
         # 老品补充变体: 普文件原 11 行 (group[0:11]) SKU 保留, 变体行重写
-        # Wood → {prefix}W-{N}, Gold → {prefix}J-{N}
+        # Wood → {prefix}M-{N}, Gold → {prefix}J-{N}
         wood_counter = 1
         gold_counter = 1
         for group in groups:
             if has_wood:
                 for i in range(11, min(16, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}W-{wood_counter}"
+                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
                     wood_counter += 1
             if has_gold:
                 gold_start = 16 if has_wood else 11
@@ -662,7 +662,7 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new",
         for group in groups:
             if has_wood:
                 for i in range(1, min(6, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}W-{wood_counter}"
+                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
                     wood_counter += 1
             if has_gold:
                 gold_start = 6 if has_wood else 1

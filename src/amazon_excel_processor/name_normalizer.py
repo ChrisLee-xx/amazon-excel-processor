@@ -120,6 +120,10 @@ def normalize_group(
     if base_title is None:
         return
 
+    # 基名清理: 下划线→空格 + 多余空格合并
+    base_title = replace_underscores(base_title)
+    base_title = collapse_spaces(base_title)
+
     for i, row in enumerate(rows):
         cell = ws.cell(row=row, column=col_idx)
         if i == 0:
@@ -129,8 +133,7 @@ def normalize_group(
             size_idx = (i - 1) % 5  # 0-4 循环
             size = sizes[size_idx]
             name = f"{base_title} {label} {size}"
-        # 新格式: 基名保留原样 (不去连字符/标点), 只合并多余空格
-        cell.value = collapse_spaces(name)
+        cell.value = name
 
 
 def _extract_base_from_rows(ws, rows, col_idx):

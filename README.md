@@ -90,7 +90,7 @@
 - **SKU 后缀规则**（各套编号各自独立连续，跨 group 不重置）：
   - parent → `{前缀}-N`（如 `HM725-1`）
   - Frame/Unframe（普通子体）→ `{前缀}P-N`（如 `HM725P-1`）
-  - Wood（木框子体）→ `{前缀}W-N`（如 `HM725W-1`）
+  - Wood（木框子体）→ `{前缀}M-N`（如 `HM725M-1`）
   - Gold（金框子体）→ `{前缀}J-N`（如 `HM725J-1`）
 - **Parent SKU 公式规则**：
   - 新品上架：parent 行清空，第 1 个 child `=B{parent_row}`，后续 `=AA{prev_row}`
