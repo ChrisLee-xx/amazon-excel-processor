@@ -103,6 +103,14 @@ PRICE_SEQUENCE_21 = [
 # List Price = Your Price (每行同步填)
 # 这里直接指向 PRICE_SEQUENCE_21, merger 阶段可共用
 
+# 新格式模板的 3 个价格列, 全部填同一价格序列
+# (价格按 size 从小到大排列, 与 Size 列顺序一致)
+PRICE_COLUMNS = [
+    "List Price",
+    "Your Price USD (Sell on Amazon, US)",
+    "Your Price USD (Amazon Business (B2B), US)",
+]
+
 
 # ===== 动态 style 计划 (木/金可选) =====
 # Frame+Unframe 永远来自普文件 (固定 11 行); Wood/Gold 按需追加在后面。
@@ -247,7 +255,7 @@ def fill_group_merged(
     新格式列映射:
       - Length 列 (Item Length Longer Edge, col124) 填英寸长度 12/18/24/30/36
       - Width 列 (Item Width Shorter Edge, col126) 填英寸宽度 8/12/16/20/24
-      - List Price 列 (col154) 是唯一价格列, 直接填价格, 无 Your Price
+      - 价格列 (List Price col154 / Your Price col182 / B2B col191) 填同一价格序列
       - Weight 列 (col147) 单位克
       - Style (col46) 填 style 标签
     """
@@ -274,8 +282,10 @@ def fill_group_merged(
     _fill_seq(ws, rows, col_map, "Item Length Longer Edge", seqs["length"])
     _fill_seq(ws, rows, col_map, "Item Width Shorter Edge", seqs["width"])
     _fill_seq(ws, rows, col_map, "Item Weight", seqs["weight"])
-    # 新格式: List Price (col154) 就是价格列, 直接填价格 (无 Your Price 同步)
-    _fill_seq(ws, rows, col_map, "List Price", seqs["price"])
+    # 新格式: 3 个价格列 (List Price / Your Price / B2B) 填同一价格序列
+    # 价格随 size 从小到大排列, 与 Size 列顺序一致
+    for price_col in PRICE_COLUMNS:
+        _fill_seq(ws, rows, col_map, price_col, seqs["price"])
     # 注意: Style 列保留原始值, 不覆盖 (Color 列才填 style 标签)
 
     # Shipping (Package) 字段填充

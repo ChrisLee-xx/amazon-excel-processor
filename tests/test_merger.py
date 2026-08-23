@@ -31,6 +31,8 @@ def _create_main_workbook(paintings):
         7: "Item Name", 46: "Style", 55: "Color", 56: "Size",
         124: "Item Length Longer Edge", 126: "Item Width Shorter Edge",
         147: "Item Weight", 154: "List Price",
+        182: "Your Price USD (Sell on Amazon, US)",
+        191: "Your Price USD (Amazon Business (B2B), US)",
     }
     for c, h in headers.items():
         ws.cell(row=HEADER_ROW, column=c).value = h
@@ -335,6 +337,63 @@ class TestMergeOnePainting:
             assert main_ws.cell(row=r, column=55).value == "Vintage Ornate Gold Frame-style"
             assert main_ws.cell(row=r, column=154).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
 
+    def test_old_variant_mode_wood_gold_three_price_columns(self):
+        """老品补充变体模式: Wood/Gold 行的 3 个价格列都按尺寸序列填充。
+
+        价格列: List Price (col154) / Your Price (col182) / B2B (col191)。
+        木金价格按 size 从小到大: 26.9 / 39.9 / 59.9 / 99.9 / 129.9。
+        """
+        s = _setup_merge_one_painting()
+        main_ws = s["main_ws"]
+        merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
+            output_start_row=4,
+            output_ws=main_ws,
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
+            mode="old_variant",
+        )
+        expected = [26.9, 39.9, 59.9, 99.9, 129.9]
+        # Wood r15-r19 + Gold r20-r24, 3 个价格列全部等于价格序列
+        for i, r in enumerate(list(range(15, 20)) + list(range(20, 25))):
+            for c in [154, 182, 191]:
+                assert main_ws.cell(row=r, column=c).value == expected[i % 5], \
+                    f"r{r} col{c}: 期望 {expected[i % 5]}, 实际 {main_ws.cell(row=r, column=c).value}"
+
+    def test_new_mode_wood_gold_three_price_columns(self):
+        """新品上架模式: Wood/Gold 行的 3 个价格列都按尺寸序列填充。"""
+        s = _setup_merge_one_painting()
+        main_ws = s["main_ws"]
+        merged = merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            wood_group=s["wood_group"],
+            gold_group=s["gold_group"],
+            output_start_row=4,
+            output_ws=main_ws,
+            col_map=s["main_col_map"],
+            wood_ws=s["wood_ws"],
+            gold_ws=s["gold_ws"],
+            max_col=s["max_col"],
+            mode="new",
+        )
+        wood_gold_rows = merged[11:]  # Wood×5 + Gold×5
+        expected = [26.9, 39.9, 59.9, 99.9, 129.9]
+        for i, r in enumerate(wood_gold_rows):
+            for c in [154, 182, 191]:
+                assert main_ws.cell(row=r, column=c).value == expected[i % 5], \
+                    f"r{r} col{c}: 期望 {expected[i % 5]}, 实际 {main_ws.cell(row=r, column=c).value}"
+        # 普通 Frame/Unframe 行的 3 个价格列也同步填充 (frame 前 5, unframe 后 5)
+        frame_prices = [19.9, 29.9, 45, 75, 99]
+        unframe_prices = [11.9, 14.9, 19.9, 24.9, 34.9]
+        for i, r in enumerate(merged[1:11]):
+            expected_p = frame_prices[i] if i < 5 else unframe_prices[i - 5]
+            for c in [154, 182, 191]:
+                assert main_ws.cell(row=r, column=c).value == expected_p
+
     def test_parent_row_style_copied_from_e8(self):
         """parent 行的 Parent SKU (E 列) 样式应复制自模板 E8 (深色填充)."""
         from openpyxl.styles import PatternFill
@@ -563,8 +622,10 @@ class TestOptionalVariants:
         assert colors[10] == "Unframe-style"
         for i in range(11, 16):
             assert colors[i] == "Vintage Wood Grain Frame-style"
-        prices = [ws.cell(row=r, column=154).value for r in merged]
-        assert prices[11:16] == [26.9, 39.9, 59.9, 99.9, 129.9]
+        # 3 个价格列 (List Price / Your Price / B2B) 都按尺寸序列填充
+        for c in [154, 182, 191]:
+            prices = [ws.cell(row=r, column=c).value for r in merged]
+            assert prices[11:16] == [26.9, 39.9, 59.9, 99.9, 129.9]
 
     def test_gold_only_16_rows(self):
         """只提供金框 (无木框) → 16 行, 金 color 紧随 main 占 index 11-15。"""
@@ -1118,3 +1179,136 @@ class TestCleanupForUpload:
         ws.cell(row=8, column=4).value = "Parent"
         # 不应抛异常
         cleanup_for_upload(ws)
+
+
+# ===== 重复 Item Weight Unit 列清理 =====
+
+class TestDuplicateWeightUnitCleanup:
+    """验证双同名列 "Item Weight Unit" 的处理。
+
+    新格式模板中该列名出现 2 次:
+      - col148: Item Weight (col147) 右侧, item_weight.unit → 有效列, 保留并填充 Grams
+      - col150: Value (col149) 旁, normalized → 无效列, 清空
+    """
+
+    def _make_wb_with_duplicate_weight_units(self):
+        """构造双 Item Weight Unit 列的 workbook (parent + 2 children, 两列都带值)。"""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Template"
+        headers = {
+            4: "Parentage Level",
+            7: "Item Name",
+            147: "Item Weight", 148: "Item Weight Unit",
+            149: "Value", 150: "Item Weight Unit",
+        }
+        for c, h in headers.items():
+            ws.cell(row=4, column=c).value = h
+        for r, par in [(8, "Parent"), (9, "Child"), (10, "Child")]:
+            ws.cell(row=r, column=4).value = par
+            ws.cell(row=r, column=147).value = 300
+            ws.cell(row=r, column=148).value = "Grams"  # 有效列 (Item Weight 右侧)
+            ws.cell(row=r, column=150).value = "Lbs"    # 无效列 (Value 旁) → 应清空
+        return wb
+
+    def test_duplicate_weight_unit_cleared_adjacent_kept(self):
+        """Value 旁的 Item Weight Unit (col150) 清空, Item Weight 右侧 (col148) 保留。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = self._make_wb_with_duplicate_weight_units()
+        ws = wb["Template"]
+        cleanup_for_upload(ws)
+        for r in [8, 9, 10]:
+            assert ws.cell(row=r, column=148).value == "Grams", \
+                f"r{r} col148 (Item Weight 右侧) 不应被清空"
+            assert ws.cell(row=r, column=150).value is None, \
+                f"r{r} col150 (Value 旁) 应被清空"
+
+    def test_single_weight_unit_not_cleared(self):
+        """只有一列 Item Weight Unit (无重复) → 不清空。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = self._make_wb_with_duplicate_weight_units()
+        ws = wb["Template"]
+        ws.cell(row=4, column=150).value = None  # 去掉重复列 → 只剩 col148
+        cleanup_for_upload(ws)
+        for r in [8, 9, 10]:
+            assert ws.cell(row=r, column=148).value == "Grams"
+
+    def test_no_item_weight_col_no_clear(self):
+        """没有 Item Weight 列时无法确认有效列 → 不清任何 Item Weight Unit。"""
+        from amazon_excel_processor.excel_io import cleanup_for_upload
+        wb = self._make_wb_with_duplicate_weight_units()
+        ws = wb["Template"]
+        ws.cell(row=4, column=147).value = "Other Field"  # Item Weight 列不存在
+        cleanup_for_upload(ws)
+        # 无法确认哪列有效, 两列都保留 (不误清)
+        for r in [8, 9, 10]:
+            assert ws.cell(row=r, column=148).value == "Grams"
+            assert ws.cell(row=r, column=150).value == "Lbs"
+
+    def test_locate_columns_picks_first_weight_unit(self):
+        """locate_columns 对重复列名保留第一个匹配 (Item Weight 右侧 col148)。
+
+        锁定填充目标: fill 逻辑通过 col_map 只写 col148, 不写 col150。
+        """
+        from amazon_excel_processor.excel_io import locate_columns
+        wb = self._make_wb_with_duplicate_weight_units()
+        ws = wb["Template"]
+        col_map = locate_columns(ws)
+        assert col_map["Item Weight"] == 147
+        assert col_map["Item Weight Unit"] == 148  # 第一个匹配, 不是 col150
+
+    def test_save_workbook_clears_duplicate_unit(self, tmp_path):
+        """save_workbook 保存时自动清空 Value 旁的重复 Item Weight Unit。"""
+        from amazon_excel_processor.excel_io import save_workbook
+        wb = self._make_wb_with_duplicate_weight_units()
+        ws = wb["Template"]
+        out = save_workbook(ws, tmp_path / "input.xlsx", "Template")
+        wb2 = load_workbook(str(out))
+        ws2 = wb2["Template"]
+        for r in [8, 9, 10]:
+            assert ws2.cell(row=r, column=148).value == "Grams"
+            assert ws2.cell(row=r, column=150).value is None
+
+
+# ===== 合并模式: 源文件带入的重复 Item Weight Unit 值被清空 =====
+
+class TestMergeClearsDuplicateWeightUnit:
+    """合并时源文件 (普/木/金) col150 带值 → 输出被清空, col148 填 Grams。"""
+
+    def test_merge_clears_value_adjacent_weight_unit(self, tmp_path):
+        """端到端: 源文件 Value 旁 Item Weight Unit (col150) 带脏值 → 输出清空。"""
+        from amazon_excel_processor.merger import merge_files
+        main_wb, _ = _create_main_workbook(["Art A"])
+        main_ws = main_wb.active
+        # 补充双 Item Weight Unit 列头 + 源文件 col150 脏值
+        main_ws.cell(row=HEADER_ROW, column=147).value = "Item Weight"
+        main_ws.cell(row=HEADER_ROW, column=148).value = "Item Weight Unit"
+        main_ws.cell(row=HEADER_ROW, column=149).value = "Value"
+        main_ws.cell(row=HEADER_ROW, column=150).value = "Item Weight Unit"
+        for r in range(DATA_START_ROW, DATA_START_ROW + 11):
+            main_ws.cell(row=r, column=150).value = "Lbs"
+
+        wood_wb = _create_variant_workbook(["Art A"], role="wood")
+        wood_ws = wood_wb.active
+        wood_ws.cell(row=HEADER_ROW, column=147).value = "Item Weight"
+        wood_ws.cell(row=HEADER_ROW, column=148).value = "Item Weight Unit"
+        wood_ws.cell(row=HEADER_ROW, column=149).value = "Value"
+        wood_ws.cell(row=HEADER_ROW, column=150).value = "Item Weight Unit"
+        for r in range(DATA_START_ROW, DATA_START_ROW + 6):
+            wood_ws.cell(row=r, column=150).value = "Lbs"
+
+        main_p = tmp_path / "main.xlsx"
+        wood_p = tmp_path / "wood.xlsx"
+        main_wb.save(str(main_p))
+        wood_wb.save(str(wood_p))
+
+        out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
+                          sku_prefix="T", mode="new")
+
+        ws = load_workbook(str(out))["Template"]
+        # 全部 16 行: col150 (Value 旁) 空, col148 (Item Weight 右侧) = Grams
+        for r in range(DATA_START_ROW, DATA_START_ROW + 16):
+            assert ws.cell(row=r, column=148).value == "Grams", \
+                f"r{r} col148 应填 Grams"
+            assert ws.cell(row=r, column=150).value is None, \
+                f"r{r} col150 (Value 旁) 应为空"

@@ -36,6 +36,8 @@ OPTIONAL_COLUMNS = [
     "Item Weight",
     "Item Weight Unit",
     "List Price",
+    "Your Price USD (Sell on Amazon, US)",
+    "Your Price USD (Amazon Business (B2B), US)",
     # Shipping (Package) 列
     "Item Package Length",
     "Package Length Unit",
@@ -98,7 +100,9 @@ def locate_columns(ws: Worksheet, header_row: int = HEADER_ROW) -> dict[str, int
         all_columns = REQUIRED_COLUMNS + OPTIONAL_COLUMNS
         for expected in all_columns:
             if header.lower() == expected.lower():
-                col_map[expected] = col_idx
+                # 保留第一个匹配 (模板有重复列名时, 如 "Item Weight Unit" 出现在 col148 和 col150)
+                if expected not in col_map:
+                    col_map[expected] = col_idx
                 break
 
     for req in REQUIRED_COLUMNS:
@@ -263,6 +267,36 @@ def _find_col_by_header(ws: Worksheet, header_name: str, header_row: int = HEADE
     return 0
 
 
+def _find_all_cols_by_header(ws: Worksheet, header_name: str,
+                             header_row: int = HEADER_ROW) -> list:
+    """按列名查找所有同名列号 (模板存在重复列名, 如 Item Weight Unit 出现 2 次)。"""
+    cols = []
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(row=header_row, column=c).value
+        if v is not None and str(v).strip().lower() == header_name.lower():
+            cols.append(c)
+    return cols
+
+
+def _find_duplicate_weight_unit_cols(ws: Worksheet, header_row: int = HEADER_ROW) -> list:
+    """定位需清空的重复 "Item Weight Unit" 列。
+
+    新格式模板中 "Item Weight Unit" 出现 2 次:
+      - Item Weight (col147) 右侧那列 (col148, item_weight.unit) — 有效列, 保留
+      - Value (col149) 旁那列 (col150, normalized) — 无效列, 需清空
+    仅当 "Item Weight" 列存在且其右邻确为 "Item Weight Unit" 时才返回需清空的列,
+    否则返回空列表 (无法确认有效列时不清, 避免误清)。
+    """
+    weight_col = _find_col_by_header(ws, "Item Weight", header_row)
+    if weight_col == 0:
+        return []
+    unit_cols = _find_all_cols_by_header(ws, "Item Weight Unit", header_row)
+    keep_col = weight_col + 1
+    if keep_col not in unit_cols:
+        return []
+    return [c for c in unit_cols if c != keep_col]
+
+
 def cleanup_for_upload(ws: Worksheet) -> None:
     """清理会导致亚马逊上传失败的字段。
 
@@ -272,6 +306,9 @@ def cleanup_for_upload(ws: Worksheet) -> None:
          普通单品填了会导致 990100 警告 + 8007 父体创建失败。
       2. Parent 行的 Item Package Length/Width/Height/Weight + 对应 Unit (col208-215):
          全部 Parent 行清空。虚拟父体没有实际包装尺寸, 只有 Child 子体才保留。
+      3. 重复的 "Item Weight Unit" 列 (全部数据行清空):
+         模板中该列名出现 2 次, 仅 Item Weight 右侧那列 (item_weight.unit) 有效,
+         Value 旁那列 (normalized) 为无效列, 从源文件带入的值需清空。
     """
     # 1. 全部行: 清空 Package Contains 字段
     cols_both = [_find_col_by_header(ws, n) for n in _CLEANUP_COLUMNS_BOTH]
@@ -281,7 +318,10 @@ def cleanup_for_upload(ws: Worksheet) -> None:
     cols_parent = [_find_col_by_header(ws, n) for n in _CLEANUP_COLUMNS_PARENT_ONLY]
     cols_parent = [c for c in cols_parent if c > 0]
 
-    if not cols_both and not cols_parent:
+    # 3. 全部行: 清空 Value 旁的重复 "Item Weight Unit" 列
+    cols_dup_unit = _find_duplicate_weight_unit_cols(ws)
+
+    if not cols_both and not cols_parent and not cols_dup_unit:
         return  # 模板里没这些列, 无需清理
 
     parentage_col = _find_col_by_header(ws, "Parentage Level")
@@ -290,6 +330,7 @@ def cleanup_for_upload(ws: Worksheet) -> None:
 
     cleaned_both = 0
     cleaned_parent = 0
+    cleaned_dup_unit = 0
     for r in range(DATA_START_ROW, ws.max_row + 1):
         parentage = ws.cell(row=r, column=parentage_col).value
         if parentage is None or str(parentage).strip() == "":
@@ -308,9 +349,16 @@ def cleanup_for_upload(ws: Worksheet) -> None:
                     ws.cell(row=r, column=c).value = None
                     cleaned_parent += 1
 
-    if cleaned_both or cleaned_parent:
-        logger.info("cleanup_for_upload: 清空 Package Contains %d 格, Parent 包装尺寸 %d 格",
-                    cleaned_both, cleaned_parent)
+        # 清空重复的 Item Weight Unit (所有数据行)
+        for c in cols_dup_unit:
+            if ws.cell(row=r, column=c).value is not None:
+                ws.cell(row=r, column=c).value = None
+                cleaned_dup_unit += 1
+
+    if cleaned_both or cleaned_parent or cleaned_dup_unit:
+        logger.info("cleanup_for_upload: 清空 Package Contains %d 格, Parent 包装尺寸 %d 格, "
+                    "重复 Item Weight Unit %d 格",
+                    cleaned_both, cleaned_parent, cleaned_dup_unit)
 
 
 def copy_cell_style(src_cell, dst_cell) -> None:

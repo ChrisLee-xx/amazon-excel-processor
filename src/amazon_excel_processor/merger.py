@@ -32,6 +32,7 @@ from .field_filler import (
     fill_group_merged,
     build_active_styles,
     _build_sequences,
+    PRICE_COLUMNS,
     STYLE_SPECS,
     detect_ratio_type,
 )
@@ -453,8 +454,10 @@ def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2", variant_st
     _set("Item Length Longer Edge", "length")
     _set("Item Width Shorter Edge", "width")
     _set("Item Weight", "weight")
-    # 新格式: List Price (col154) 就是价格列, 直接填
-    _set("List Price", "price")
+    # 新格式: 3 个价格列 (List Price / Your Price / B2B) 填同一价格序列
+    # 价格随 size 从小到大排列, 与 Size 列顺序一致
+    for price_col in PRICE_COLUMNS:
+        _set(price_col, "price")
     # 注意: Style 列保留原始值, 不覆盖 (Color 列才填 style 标签)
 
     # Shipping (Package) 字段填充
