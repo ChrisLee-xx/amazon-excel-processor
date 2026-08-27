@@ -108,9 +108,10 @@ def _run_single(input_path: Path, flog: logging.Logger, sku_prefix: str = ""):
         prefix = build_sku_prefix(sku_prefix)
         sku_col = col_map.get("SKU", 1)
         parent_sku_col = col_map.get("Parent SKU", 5)
-        rewrite_sku(ws, groups, prefix, sku_col=sku_col, mode="new")
+        rewrite_sku(ws, groups, prefix, sku_col=sku_col,
+                    has_wood=False, has_gold=False)
         write_parent_sku_formulas(ws, groups, parent_sku_col=parent_sku_col,
-                                  seller_sku_col=sku_col, mode="new")
+                                  seller_sku_col=sku_col)
         log(f">> SKU 命名完成: 前缀={prefix} (父体={prefix}-N, 普通子体={prefix}P-N)")
 
     log("\n>> 保存文件...")
@@ -170,9 +171,8 @@ def _run_merge(main_path: Path, wood_path, gold_path, flog: logging.Logger):
         wood_path=wood_path,
         gold_path=gold_path,
         sku_prefix=sku_prefix,
-        mode=mode,
     )
-    flog.info("合并输出: %s (mode=%s)", output_path, mode)
+    flog.info("合并输出: %s (mode=%s)", output_path, mode_label)
 
     log("")
     log("=" * 50)
