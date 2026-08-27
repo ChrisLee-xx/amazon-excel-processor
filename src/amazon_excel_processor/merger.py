@@ -240,10 +240,11 @@ def merge_one_painting(
     gold_ws=None,
     max_col=None,
     ratio_type="3:2",
-    mode="new",
     name_col=None,
 ):
     """合并 1 画到动态行数结构 (木/金可选).
+
+    只支持"新品上架"模式: 全部行 normalize + fill + meta。
 
     Args:
         main_snapshots: 11 元素 list (main group 行的快照, 必须提前快照避免被覆盖)
@@ -255,8 +256,7 @@ def merge_one_painting(
         wood_ws: 木框文件 worksheet (用于读 wood_group 数据)
         gold_ws: 金框文件 worksheet (用于读 gold_group 数据)
         max_col: 列数
-        mode: "new" = 新品上架 (全部行 normalize + fill + meta)
-              "old_variant" = 老品补充变体 (普文件原 11 行保留不动, 仅变体行处理)
+        ratio_type: "3:2" 或 "square"
         name_col: Item Name 列号 (动态从 col_map 读取; None 用硬编码常量)
 
     输出行数 = 1 + 5×(2 + 有木 + 有金): 11 / 16 / 21。
@@ -271,23 +271,11 @@ def merge_one_painting(
         assert wood_ws is not None and len(wood_group) == VARIANT_GROUP_SIZE
     if has_gold:
         assert gold_ws is not None and len(gold_group) == VARIANT_GROUP_SIZE
-    # old_variant 模式必须有变体行可处理
-    if mode == "old_variant" and not (has_wood or has_gold):
-        raise ValueError("老品补充变体模式需要至少一个木框或金框文件")
 
     if max_col is None:
         max_col = output_ws.max_column
 
-    if mode == "old_parent":
-        # 老品合并: 只保留父体 + 金木变体, style 只有 wood/gold
-        variant_keys = []
-        if has_wood:
-            variant_keys.append("wood")
-        if has_gold:
-            variant_keys.append("gold")
-        active_styles = variant_keys
-    else:
-        active_styles = build_active_styles(has_wood, has_gold)
+    active_styles = build_active_styles(has_wood, has_gold)
 
     merged_rows = []
 
@@ -296,19 +284,12 @@ def merge_one_painting(
     _write_row(output_ws, parent_row, main_snapshots[0], max_col)
     merged_rows.append(parent_row)
 
-    # 变体 children 起始偏移 (main 子体行数)
-    #   new / old_variant: main 恒占 11 行 (parent + Frame×5 + Unframe×5)
-    #   old_parent: 只保留父体, 丢弃 Frame/Unframe 子体, 变体紧跟父体
-    if mode == "old_parent":
-        # 只保留父体, 不写 main 的 Frame/Unframe 子体
-        next_offset = 1
-    else:
-        # main children: Frame×5 + Unframe×5 → output rows 1-10 (恒定 10 行)
-        for i, snap in enumerate(main_snapshots[1:]):
-            dst = output_start_row + 1 + i
-            _write_row(output_ws, dst, snap, max_col)
-            merged_rows.append(dst)
-        next_offset = 11  # main 占 11 行 (1 parent + 10 children)
+    # main children: Frame×5 + Unframe×5 → output rows 1-10 (恒定 10 行)
+    for i, snap in enumerate(main_snapshots[1:]):
+        dst = output_start_row + 1 + i
+        _write_row(output_ws, dst, snap, max_col)
+        merged_rows.append(dst)
+    next_offset = 11  # main 占 11 行 (1 parent + 10 children)
 
     if has_wood:
         wood_snapshots = [_snapshot_row(wood_ws, r, max_col) for r in wood_group]
@@ -325,32 +306,10 @@ def merge_one_painting(
             merged_rows.append(dst)
         next_offset += 5
 
-    if mode == "new":
-        # 新品上架: 全部行 normalize + fill + meta
-        normalize_group_merged(output_ws, merged_rows, name_col, ratio_type, active_styles)
-        fill_group_merged(output_ws, merged_rows, col_map, ratio_type, active_styles)
-        _fill_meta_columns(output_ws, merged_rows, col_map)
-    elif mode == "old_variant":
-        # 老品补充变体: 普文件原 11 行 (rows[0:11]) 完全不动
-        # 仅对变体行 (rows[11:]) 做 normalize + fill + meta
-        variant_rows = merged_rows[11:]
-        variant_styles = active_styles[2:]  # 去掉 frame/unframe, 只剩变体 style
-        _normalize_variant_names(output_ws, merged_rows, variant_rows, name_col,
-                                 ratio_type, variant_styles)
-        _fill_variant_fields(output_ws, variant_rows, col_map, ratio_type, variant_styles)
-        _fill_meta_columns_variant(output_ws, variant_rows, col_map)
-    elif mode == "old_parent":
-        # 老品合并 (只保留父体): 输出 = 父体 + 金×5 + 木×5
-        # 丢弃普的 Frame/Unframe 子体; 父体行完整保留 (含原 SKU)
-        # 变体行 (merged_rows[1:]) 做 normalize + fill + meta
-        variant_rows = merged_rows[1:]
-        variant_styles = active_styles  # 只有 wood/gold (build_active_styles 已过滤)
-        _normalize_variant_names(output_ws, merged_rows, variant_rows, name_col,
-                                 ratio_type, variant_styles)
-        _fill_variant_fields(output_ws, variant_rows, col_map, ratio_type, variant_styles)
-        _fill_meta_columns_variant(output_ws, variant_rows, col_map)
-    else:
-        raise ValueError(f"未知 mode: {mode}")
+    # 新品上架: 全部行 normalize + fill + meta
+    normalize_group_merged(output_ws, merged_rows, name_col, ratio_type, active_styles)
+    fill_group_merged(output_ws, merged_rows, col_map, ratio_type, active_styles)
+    _fill_meta_columns(output_ws, merged_rows, col_map)
 
     # 把模板单元格样式复制到生成的产品组上
     # (如 E8 的"涂黑"样式 → 每个 group parent 行的 Parent SKU 列)
@@ -592,18 +551,15 @@ def _clean_item_name(text: str) -> str:
     return text
 
 
-def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new",
+def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
                 has_wood=False, has_gold=False):
-    """重写 Seller SKU.
+    """重写 Seller SKU (新品上架模式).
 
     Args:
         ws: 目标 worksheet
         groups: 多个 group (行号列表, 长度 11/16/21 取决于木/金组合)
         prefix: SKU 前缀 (如 HM725)
         sku_col: Seller SKU 列
-        mode: "new" = 新品上架 (全部行重写)
-              "old_variant" = 老品补充变体 (普文件原 11 行 SKU 保留, 变体行重写)
-              "old_parent" = 老品合并 (父体 SKU 保留, 金木变体重写)
         has_wood: 是否有木框变体 (Wood 行用 M 后缀)
         has_gold: 是否有金框变体 (Gold 行用 J 后缀)
 
@@ -614,81 +570,37 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU, mode="new",
         Gold         → {prefix}J-N     (金框子体, J=Gold)
     各套编号各自独立连续 (跨 group 不重置)。
 
-    group 行布局:
-        new / old_variant: [parent, Frame×5, Unframe×5, Wood×5(若有), Gold×5(若有)]
-        old_parent:        [parent, Wood×5(若有), Gold×5(若有)]
+    group 行布局: [parent, Frame×5, Unframe×5, Wood×5(若有), Gold×5(若有)]
     """
-    if mode == "new":
-        parent_counter = 1
-        normal_counter = 1
-        wood_counter = 1
-        gold_counter = 1
-        for group in groups:
-            # parent → {prefix}-{N}
-            ws.cell(row=group[0], column=sku_col).value = f"{prefix}-{parent_counter}"
-            parent_counter += 1
-            # group[1:11] = Frame×5 + Unframe×5 (普通子体) → {prefix}P-{N}
-            for i in range(1, min(11, len(group))):
-                ws.cell(row=group[i], column=sku_col).value = f"{prefix}P-{normal_counter}"
-                normal_counter += 1
-            # Wood 行: group[11:16] (若 has_wood) → {prefix}M-{N}
-            if has_wood:
-                for i in range(11, min(16, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
-                    wood_counter += 1
-            # Gold 行: group[16:21] (若 has_wood) 或 group[11:16] (若 !has_wood) → {prefix}J-{N}
-            if has_gold:
-                gold_start = 16 if has_wood else 11
-                for i in range(gold_start, min(gold_start + 5, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}J-{gold_counter}"
-                    gold_counter += 1
-    elif mode == "old_variant":
-        # 老品补充变体: 普文件原 11 行 (group[0:11]) SKU 保留, 变体行重写
-        # Wood → {prefix}M-{N}, Gold → {prefix}J-{N}
-        wood_counter = 1
-        gold_counter = 1
-        for group in groups:
-            if has_wood:
-                for i in range(11, min(16, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
-                    wood_counter += 1
-            if has_gold:
-                gold_start = 16 if has_wood else 11
-                for i in range(gold_start, min(gold_start + 5, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}J-{gold_counter}"
-                    gold_counter += 1
-    elif mode == "old_parent":
-        # 老品合并: 父体 (group[0]) SKU 保留, 金木变体行重写
-        # old_parent group 布局: [parent, Wood×5(若有), Gold×5(若有)]
-        wood_counter = 1
-        gold_counter = 1
-        for group in groups:
-            if has_wood:
-                for i in range(1, min(6, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
-                    wood_counter += 1
-            if has_gold:
-                gold_start = 6 if has_wood else 1
-                for i in range(gold_start, min(gold_start + 5, len(group))):
-                    ws.cell(row=group[i], column=sku_col).value = f"{prefix}J-{gold_counter}"
-                    gold_counter += 1
-    else:
-        raise ValueError(f"未知 mode: {mode}, 期望 'new'/'old_variant'/'old_parent'")
+    parent_counter = 1
+    normal_counter = 1
+    wood_counter = 1
+    gold_counter = 1
+    for group in groups:
+        # parent → {prefix}-{N}
+        ws.cell(row=group[0], column=sku_col).value = f"{prefix}-{parent_counter}"
+        parent_counter += 1
+        # group[1:11] = Frame×5 + Unframe×5 (普通子体) → {prefix}P-{N}
+        for i in range(1, min(11, len(group))):
+            ws.cell(row=group[i], column=sku_col).value = f"{prefix}P-{normal_counter}"
+            normal_counter += 1
+        # Wood 行: group[11:16] (若 has_wood) → {prefix}M-{N}
+        if has_wood:
+            for i in range(11, min(16, len(group))):
+                ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
+                wood_counter += 1
+        # Gold 行: group[16:21] (若 has_wood) 或 group[11:16] (若 !has_wood) → {prefix}J-{N}
+        if has_gold:
+            gold_start = 16 if has_wood else 11
+            for i in range(gold_start, min(gold_start + 5, len(group))):
+                ws.cell(row=group[i], column=sku_col).value = f"{prefix}J-{gold_counter}"
+                gold_counter += 1
 
 
-def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_sku_col=COL_SELLER_SKU, mode="new"):
-    """写 Parent SKU 公式.
+def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_sku_col=COL_SELLER_SKU):
+    """写 Parent SKU 公式 (新品上架模式).
 
-    Args:
-        ws: 目标 worksheet
-        groups: 多个 21 行 group
-        parent_sku_col: Parent SKU 列
-        seller_sku_col: Seller SKU 列
-        mode: "new" = 新品上架 (全部 21 行 parent SKU 公式重写)
-              "old_variant" = 老品补充变体 (普文件原 11 行保留,
-                              新增 Wood/Gold 行从 =AA{prev_unframe_last} 开始链式引用)
-              "old_parent" = 老品合并 (父体 parent SKU 保留原值,
-                              金木变体直接用 =A{parent_row} 引用父体 SKU)
+    parent 行清空; 第 1 child ={seller_letter}{parent_row}; 后续 ={parent_sku_letter}{prev_row}。
     """
     seller_letter = _col_letter(seller_sku_col)
     parent_sku_letter = _col_letter(parent_sku_col)
@@ -696,34 +608,13 @@ def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_
     for group in groups:
         if len(group) < 2:
             continue
-
-        if mode == "new":
-            # 全部重写: parent 清空, 第 1 child =B{parent}, 后续 =AA{prev}
-            parent_row = group[0]
-            first_child = group[1]
-            ws.cell(row=parent_row, column=parent_sku_col).value = None
-            ws.cell(row=first_child, column=parent_sku_col).value = f"={seller_letter}{parent_row}"
-            for i in range(2, len(group)):
-                prev_row = group[i - 1]
-                ws.cell(row=group[i], column=parent_sku_col).value = f"={parent_sku_letter}{prev_row}"
-
-        elif mode == "old_variant":
-            # 普文件原 11 行 (group[0:11]) parent SKU 公式保留
-            # 新增 Wood/Gold 行 (group[11:21]) 从 =AA{group[10]} 开始链式
-            prev_row = group[10]  # Unframe 最后一个
-            for i in range(11, len(group)):
-                ws.cell(row=group[i], column=parent_sku_col).value = f"={parent_sku_letter}{prev_row}"
-                prev_row = group[i]
-
-        elif mode == "old_parent":
-            # 父体 parent SKU 保留原值 (不覆盖)
-            # 金木变体直接用 =A{parent_row} 引用父体 SKU (单层, 不链式)
-            parent_row = group[0]
-            for i in range(1, len(group)):
-                ws.cell(row=group[i], column=parent_sku_col).value = f"={seller_letter}{parent_row}"
-
-        else:
-            raise ValueError(f"未知 mode: {mode}, 期望 'new'/'old_variant'/'old_parent'")
+        parent_row = group[0]
+        first_child = group[1]
+        ws.cell(row=parent_row, column=parent_sku_col).value = None
+        ws.cell(row=first_child, column=parent_sku_col).value = f"={seller_letter}{parent_row}"
+        for i in range(2, len(group)):
+            prev_row = group[i - 1]
+            ws.cell(row=group[i], column=parent_sku_col).value = f"={parent_sku_letter}{prev_row}"
 
 
 def merge_files(
@@ -731,19 +622,15 @@ def merge_files(
     wood_path=None,
     gold_path=None,
     sku_prefix="",
-    mode="new",
     output_path=None,
 ):
-    """合并主入口 (木/金可选).
+    """合并主入口 (木/金可选, 只支持新品上架模式).
 
     Args:
         main_path: 普文件 (11 行/组, Frame+Unframe), 必填
         wood_path: 木框文件 (6 行/组, 每画 1 个 group), 可选; None 表示无木框
         gold_path: 金框文件 (6 行/组, 每画 1 个 group), 可选; None 表示无金框
         sku_prefix: SKU 前缀 (如 HM725, 推荐格式 店铺名+日期+主题)
-        mode: "new" = 新品上架 (全部 SKU 重写)
-              "old_variant" = 老品补充变体 (普文件原 SKU 保留, 仅变体重写);
-                              此模式需要至少一个木/金文件
         output_path: 输出路径 (默认: {main_stem}_processed.xlsm)
 
     输出每组行数 = 1 + 5×(2 + 有木 + 有金): 11 / 16 / 21。
@@ -756,15 +643,13 @@ def merge_files(
     gold_path = Path(gold_path) if gold_path is not None else None
     has_wood = wood_path is not None
     has_gold = gold_path is not None
-    if mode in ("old_variant", "old_parent") and not (has_wood or has_gold):
-        raise ValueError("老品模式(补充变体/合并)需要至少一个木框或金框文件")
 
     prefix = build_sku_prefix(sku_prefix)
-    logger.info("合并开始: main=%s, wood=%s, gold=%s, prefix=%s, mode=%s",
+    logger.info("合并开始: main=%s, wood=%s, gold=%s, prefix=%s",
                 main_path.name,
                 wood_path.name if has_wood else "无",
                 gold_path.name if has_gold else "无",
-                prefix, mode)
+                prefix)
 
     main_wb, main_ws, main_sheet = load_workbook(main_path)
     wood_ws = gold_ws = None
@@ -826,11 +711,7 @@ def merge_files(
     # 合并模式支持 3:2 和 square, 由 main 文件 Size 列预填值决定
     main_ratio_types = {id(g): detect_ratio_type(main_ws, g, col_map) for g in main_groups}
 
-    if mode == "old_parent":
-        # 老品合并: 只保留父体 + 金木变体 (不含 Frame/Unframe)
-        group_size = 1 + 5 * (bool(has_wood) + bool(has_gold))
-    else:
-        group_size = merged_group_size(has_wood, has_gold)
+    group_size = merged_group_size(has_wood, has_gold)
 
     # 追踪每个 base name 已配对次数 (支持同名多 group 按顺序配对)
     # 普/木/金文件的产品顺序一致, 同名产品按出现顺序配对
@@ -876,7 +757,6 @@ def merge_files(
             gold_ws=gold_ws,
             max_col=max_col_for_snapshot,
             ratio_type=ratio_type,
-            mode=mode,
             name_col=name_col,
         )
         new_groups.append(merged)
@@ -887,10 +767,10 @@ def merge_files(
         _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
                              has_wood, has_gold, name_col)
 
-    rewrite_sku(main_ws, new_groups, prefix, sku_col=sku_col, mode=mode,
+    rewrite_sku(main_ws, new_groups, prefix, sku_col=sku_col,
                 has_wood=has_wood, has_gold=has_gold)
     write_parent_sku_formulas(main_ws, new_groups, parent_sku_col=parent_sku_col,
-                              seller_sku_col=sku_col, mode=mode)
+                              seller_sku_col=sku_col)
 
     out = save_workbook(
         main_ws,

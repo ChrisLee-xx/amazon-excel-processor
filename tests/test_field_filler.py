@@ -32,16 +32,16 @@ def _make_32_names():
     """生成 3:2 比例的 11 行产品名称。"""
     return [
         "Parent Title",
-        "Title Frame-style 08x12inch(20x30cm)",
-        "Title Frame-style 12x18inch(30x45cm)",
-        "Title Frame-style 16x24inch(40x60cm)",
-        "Title Frame-style 20x30inch(50x75cm)",
-        "Title Frame-style 24x36inch(60x90cm)",
-        "Title Unframe-style 08x12inch(20x30cm)",
-        "Title Unframe-style 12x18inch(30x45cm)",
-        "Title Unframe-style 16x24inch(40x60cm)",
-        "Title Unframe-style 20x30inch(50x75cm)",
-        "Title Unframe-style 24x36inch(60x90cm)",
+        f'Title Frame-style 12"L x 8"W',
+        f'Title Frame-style 18"L x 12"W',
+        f'Title Frame-style 24"L x 16"W',
+        f'Title Frame-style 30"L x 20"W',
+        f'Title Frame-style 36"L x 24"W',
+        f'Title Unframe-style 12"L x 8"W',
+        f'Title Unframe-style 18"L x 12"W',
+        f'Title Unframe-style 24"L x 16"W',
+        f'Title Unframe-style 30"L x 20"W',
+        f'Title Unframe-style 36"L x 24"W',
     ]
 
 
@@ -49,16 +49,16 @@ def _make_square_names():
     """生成正方形比例的 11 行产品名称。"""
     return [
         "Parent Title",
-        "Title Frame-style 12x12inch(30x30cm)",
-        "Title Frame-style 16x16inch(40x40cm)",
-        "Title Frame-style 20x20inch(50x50cm)",
-        "Title Frame-style 24x24inch(60x60cm)",
-        "Title Frame-style 28x28inch(70x70cm)",
-        "Title Unframe-style 12x12inch(30x30cm)",
-        "Title Unframe-style 16x16inch(40x40cm)",
-        "Title Unframe-style 20x20inch(50x50cm)",
-        "Title Unframe-style 24x24inch(60x60cm)",
-        "Title Unframe-style 28x28inch(70x70cm)",
+        f'Title Frame-style 12"L x 12"W',
+        f'Title Frame-style 16"L x 16"W',
+        f'Title Frame-style 20"L x 20"W',
+        f'Title Frame-style 24"L x 24"W',
+        f'Title Frame-style 28"L x 28"W',
+        f'Title Unframe-style 12"L x 12"W',
+        f'Title Unframe-style 16"L x 16"W',
+        f'Title Unframe-style 20"L x 20"W',
+        f'Title Unframe-style 24"L x 24"W',
+        f'Title Unframe-style 28"L x 28"W',
     ]
 
 
@@ -69,7 +69,7 @@ class TestDetectRatioType:
         assert detect_ratio_type(ws, rows, col_map) == "3:2"
 
     def test_32_ratio_size_prefilled_unequal(self):
-        """Size 列预填值 L!=W（如 12L''x08W''）→ 3:2"""
+        """Size 列预填值 L!=W（如 12"L x 8"W）→ 3:2"""
         ws, rows, col_map = _create_test_ws(_make_32_names())
         size_col = col_map["Size"]
         # 3:2 尺寸: L != W

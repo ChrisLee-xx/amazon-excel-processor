@@ -273,97 +273,6 @@ class TestMergeOnePainting:
         # wood 文件第 1 个 group 的第 1 个 child 是 r5 (parent r4, child r5-r9)
         assert wood_child_sku == "WOOD-9"
         assert gold_child_sku == "GOLD-9"
-
-    def test_old_variant_mode_preserves_main_rows(self):
-        """老品补充变体模式: 普文件原 11 行 (r4-r14) 完全不动, 仅 Wood/Gold 行处理"""
-        s = _setup_merge_one_painting()
-        main_ws = s["main_ws"]
-        main_col_map = s["main_col_map"]
-        main_snapshots = s["main_snapshots"]
-
-        # 先记录普文件原 11 行的所有列值 (从快照)
-        original_values = {}
-        for i in range(11):
-            for c, v in main_snapshots[i].items():
-                original_values[(i, c)] = v
-
-        # 用老品补充模式合并
-        merge_one_painting(
-            main_snapshots=main_snapshots,
-            wood_group=s["wood_group"],
-            gold_group=s["gold_group"],
-            output_start_row=4,
-            output_ws=main_ws,
-            col_map=main_col_map,
-            wood_ws=s["wood_ws"],
-            gold_ws=s["gold_ws"],
-            max_col=s["max_col"],
-            mode="old_variant",
-        )
-
-        # 验证 r4-r14 (普文件原 11 行) 的所有列值没变
-        for i in range(11):
-            r = 4 + i
-            for c in range(1, s["max_col"] + 1):
-                orig = original_values[(i, c)]
-                now = main_ws.cell(row=r, column=c).value
-                # 空字符串和 None 视为相同
-                orig_e = orig if orig not in (None, "") else ""
-                now_e = now if now not in (None, "") else ""
-                assert orig_e == now_e, f"r{r} col{c}: 原值={orig} 现值={now} (老品补充不应修改普文件原行)"
-
-    def test_old_variant_mode_wood_gold_color_price(self):
-        """老品补充变体模式: Wood/Gold 行的 Color 和 Price 仍正确填充"""
-        s = _setup_merge_one_painting()
-        main_ws = s["main_ws"]
-        merge_one_painting(
-            main_snapshots=s["main_snapshots"],
-            wood_group=s["wood_group"],
-            gold_group=s["gold_group"],
-            output_start_row=4,
-            output_ws=main_ws,
-            col_map=s["main_col_map"],
-            wood_ws=s["wood_ws"],
-            gold_ws=s["gold_ws"],
-            max_col=s["max_col"],
-            mode="old_variant",
-        )
-        # Wood r15-r19
-        for i, r in enumerate(range(15, 20)):
-            assert main_ws.cell(row=r, column=55).value == "Vintage Wood Grain Frame-style"
-            assert main_ws.cell(row=r, column=154).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
-        # Gold r20-r24
-        for i, r in enumerate(range(20, 25)):
-            assert main_ws.cell(row=r, column=55).value == "Vintage Ornate Gold Frame-style"
-            assert main_ws.cell(row=r, column=154).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
-
-    def test_old_variant_mode_wood_gold_three_price_columns(self):
-        """老品补充变体模式: Wood/Gold 行的 3 个价格列都按尺寸序列填充。
-
-        价格列: List Price (col154) / Your Price (col182) / B2B (col191)。
-        木金价格按 size 从小到大: 26.9 / 39.9 / 59.9 / 99.9 / 129.9。
-        """
-        s = _setup_merge_one_painting()
-        main_ws = s["main_ws"]
-        merge_one_painting(
-            main_snapshots=s["main_snapshots"],
-            wood_group=s["wood_group"],
-            gold_group=s["gold_group"],
-            output_start_row=4,
-            output_ws=main_ws,
-            col_map=s["main_col_map"],
-            wood_ws=s["wood_ws"],
-            gold_ws=s["gold_ws"],
-            max_col=s["max_col"],
-            mode="old_variant",
-        )
-        expected = [26.9, 39.9, 59.9, 99.9, 129.9]
-        # Wood r15-r19 + Gold r20-r24, 3 个价格列全部等于价格序列
-        for i, r in enumerate(list(range(15, 20)) + list(range(20, 25))):
-            for c in [154, 182, 191]:
-                assert main_ws.cell(row=r, column=c).value == expected[i % 5], \
-                    f"r{r} col{c}: 期望 {expected[i % 5]}, 实际 {main_ws.cell(row=r, column=c).value}"
-
     def test_new_mode_wood_gold_three_price_columns(self):
         """新品上架模式: Wood/Gold 行的 3 个价格列都按尺寸序列填充。"""
         s = _setup_merge_one_painting()
@@ -378,7 +287,6 @@ class TestMergeOnePainting:
             wood_ws=s["wood_ws"],
             gold_ws=s["gold_ws"],
             max_col=s["max_col"],
-            mode="new",
         )
         wood_gold_rows = merged[11:]  # Wood×5 + Gold×5
         expected = [26.9, 39.9, 59.9, 99.9, 129.9]
@@ -429,7 +337,7 @@ class TestRewriteSku:
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25)), list(range(25, 46))]
-        rewrite_sku(ws, groups, prefix="HM725", mode="new", has_wood=True, has_gold=True)
+        rewrite_sku(ws, groups, prefix="HM725", has_wood=True, has_gold=True)
         # group 1: parent = HM725-1
         assert ws.cell(row=4, column=1).value == "HM725-1"
         # group 1: 普通子体 (r5-r14) = HM725P-1 到 HM725P-10
@@ -457,7 +365,7 @@ class TestRewriteSku:
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25))]
-        rewrite_sku(ws, groups, prefix="AB", mode="new", has_wood=True, has_gold=True)
+        rewrite_sku(ws, groups, prefix="AB", has_wood=True, has_gold=True)
         # parent
         assert ws.cell(row=4, column=1).value == "AB-1"
         # 普通子体
@@ -475,7 +383,7 @@ class TestRewriteSku:
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 20))]  # 16 行: parent + 10 普通 + 5 木
-        rewrite_sku(ws, groups, prefix="T", mode="new", has_wood=True, has_gold=False)
+        rewrite_sku(ws, groups, prefix="T", has_wood=True, has_gold=False)
         assert ws.cell(row=4, column=1).value == "T-1"
         assert ws.cell(row=5, column=1).value == "TP-1"
         assert ws.cell(row=14, column=1).value == "TP-10"
@@ -487,61 +395,19 @@ class TestRewriteSku:
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 20))]  # 16 行: parent + 10 普通 + 5 金
-        rewrite_sku(ws, groups, prefix="T", mode="new", has_wood=False, has_gold=True)
+        rewrite_sku(ws, groups, prefix="T", has_wood=False, has_gold=True)
         assert ws.cell(row=4, column=1).value == "T-1"
         assert ws.cell(row=5, column=1).value == "TP-1"
         assert ws.cell(row=14, column=1).value == "TP-10"
         assert ws.cell(row=15, column=1).value == "TJ-1"
         assert ws.cell(row=19, column=1).value == "TJ-5"
-
-    def test_old_variant_mode_preserves_main_sku(self):
-        """老品补充变体: group[0:11] (普文件原 11 行) SKU 保留, 木框=W, 金框=J"""
-        wb = Workbook()
-        ws = wb.active
-        groups = [list(range(4, 25))]
-        # 预设普文件原 11 行的 SKU (group[0:11] = r4-r14)
-        for i, r in enumerate(groups[0][:11]):
-            ws.cell(row=r, column=1).value = f"OLD-{i+1}"
-        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant", has_wood=True, has_gold=True)
-        # r4-r14 保留原 SKU
-        assert ws.cell(row=4, column=1).value == "OLD-1"
-        assert ws.cell(row=14, column=1).value == "OLD-11"
-        # r15-r19 (Wood) = NEWM-1 到 NEWM-5
-        assert ws.cell(row=15, column=1).value == "NEWM-1"
-        assert ws.cell(row=19, column=1).value == "NEWM-5"
-        # r20-r24 (Gold) = NEWJ-1 到 NEWJ-5
-        assert ws.cell(row=20, column=1).value == "NEWJ-1"
-        assert ws.cell(row=24, column=1).value == "NEWJ-5"
-
-    def test_old_variant_mode_multi_groups_continuous(self):
-        """老品补充变体: 多 group 时 Wood/Gold 各自跨 group 连续编号"""
-        wb = Workbook()
-        ws = wb.active
-        groups = [list(range(4, 25)), list(range(25, 46))]
-        rewrite_sku(ws, groups, prefix="NEW", mode="old_variant", has_wood=True, has_gold=True)
-        # group 1: r15-r19 (Wood) = NEWM-1 到 NEWM-5
-        assert ws.cell(row=15, column=1).value == "NEWM-1"
-        assert ws.cell(row=19, column=1).value == "NEWM-5"
-        # group 1: r20-r24 (Gold) = NEWJ-1 到 NEWJ-5
-        assert ws.cell(row=20, column=1).value == "NEWJ-1"
-        assert ws.cell(row=24, column=1).value == "NEWJ-5"
-        # group 2: r36-r40 (Wood) = NEWM-6 到 NEWM-10
-        assert ws.cell(row=36, column=1).value == "NEWM-6"
-        assert ws.cell(row=40, column=1).value == "NEWM-10"
-        # group 2: r41-r45 (Gold) = NEWJ-6 到 NEWJ-10
-        assert ws.cell(row=41, column=1).value == "NEWJ-6"
-        assert ws.cell(row=45, column=1).value == "NEWJ-10"
-
-
-# ===== write_parent_sku_formulas =====
-
 class TestWriteParentSkuFormulas:
     def test_first_child_uses_b_parent_new_mode(self):
         """新品上架: parent 清空, 第 1 child =B4, 后续 =AA{prev}"""
         wb = Workbook()
         ws = wb.active
         rows = list(range(4, 25))
-        write_parent_sku_formulas(ws, [rows], mode="new")
+        write_parent_sku_formulas(ws, [rows])
         assert ws.cell(row=4, column=5).value in (None, "")
         assert ws.cell(row=5, column=5).value == "=A4"
         assert ws.cell(row=6, column=5).value == "=E5"
@@ -551,37 +417,11 @@ class TestWriteParentSkuFormulas:
     def test_multiple_groups_new_mode(self):
         wb = Workbook()
         ws = wb.active
-        write_parent_sku_formulas(ws, [list(range(4, 25)), list(range(25, 46))], mode="new")
+        write_parent_sku_formulas(ws, [list(range(4, 25)), list(range(25, 46))])
         assert ws.cell(row=5, column=5).value == "=A4"
         assert ws.cell(row=6, column=5).value == "=E5"
         assert ws.cell(row=26, column=5).value == "=A25"
         assert ws.cell(row=27, column=5).value == "=E26"
-
-    def test_old_variant_mode_preserves_main_formulas(self):
-        """老品补充变体: group[0:11] parent SKU 公式保留, group[11:21] 从 =AA{group[10]} 开始"""
-        wb = Workbook()
-        ws = wb.active
-        rows = list(range(4, 25))
-        # 预设普文件原 11 行的 parent SKU 公式
-        ws.cell(row=4, column=5).value = None       # parent
-        ws.cell(row=5, column=5).value = "=A4"      # Frame 1
-        ws.cell(row=6, column=5).value = "=E5"
-        ws.cell(row=14, column=5).value = "=E13"   # Unframe 5 (最后一个)
-        write_parent_sku_formulas(ws, [rows], mode="old_variant")
-        # r4-r14 保留
-        assert ws.cell(row=4, column=5).value is None
-        assert ws.cell(row=5, column=5).value == "=A4"
-        assert ws.cell(row=14, column=5).value == "=E13"
-        # r15 (Wood 1) = =AA14 (引用 r14 Unframe 最后一个)
-        assert ws.cell(row=15, column=5).value == "=E14"
-        # r16 = =AA15
-        assert ws.cell(row=16, column=5).value == "=E15"
-        # r24 (Gold 5) = =AA23
-        assert ws.cell(row=24, column=5).value == "=E23"
-
-
-# ===== build_sku_prefix =====
-
 class TestBuildSkuPrefix:
     def test_single_string(self):
         assert build_sku_prefix("HM725") == "HM725"
@@ -662,65 +502,9 @@ class TestOptionalVariants:
             gold_group=None,
             gold_ws=None,
             max_col=s["max_col"],
-            mode="new",
         )
         assert len(merged) == 11
         assert merged[-1] == 14
-
-    def test_old_variant_requires_variant(self):
-        """old_variant 模式无变体 → 报错。"""
-        s = _setup_merge_one_painting()
-        with pytest.raises(ValueError, match="至少一个木框或金框"):
-            merge_one_painting(
-                main_snapshots=s["main_snapshots"],
-                output_start_row=4,
-                output_ws=s["main_ws"],
-                col_map=s["main_col_map"],
-                wood_group=None,
-                gold_group=None,
-                mode="old_variant",
-            )
-
-    def test_old_variant_wood_only_preserves_main(self):
-        """old_variant + 只木 → main 11 行不动, 木 5 行处理, 无金行。"""
-        s = _setup_merge_one_painting()
-        main_ws = s["main_ws"]
-        main_snapshots = s["main_snapshots"]
-        original = {}
-        for i in range(11):
-            for c, v in main_snapshots[i].items():
-                original[(i, c)] = v
-        merge_one_painting(
-            main_snapshots=main_snapshots,
-            output_start_row=4,
-            output_ws=main_ws,
-            col_map=s["main_col_map"],
-            wood_group=s["wood_group"],
-            wood_ws=s["wood_ws"],
-            gold_group=None,
-            gold_ws=None,
-            max_col=s["max_col"],
-            mode="old_variant",
-        )
-        # main 11 行 (r4-r14) 完全不变
-        for i in range(11):
-            r = 4 + i
-            for c in range(1, s["max_col"] + 1):
-                orig = original[(i, c)]
-                now = main_ws.cell(row=r, column=c).value
-                orig_e = orig if orig not in (None, "") else ""
-                now_e = now if now not in (None, "") else ""
-                assert orig_e == now_e, f"r{r} col{c}: 原值={orig} 现值={now}"
-        # 木行 r15-r19
-        for i, r in enumerate(range(15, 20)):
-            assert main_ws.cell(row=r, column=55).value == "Vintage Wood Grain Frame-style"
-            assert main_ws.cell(row=r, column=154).value == [26.9, 39.9, 59.9, 99.9, 129.9][i]
-        # 无金行
-        assert main_ws.cell(row=20, column=55).value in (None, "")
-
-
-# ===== merge_files 集成 (木/金可选) =====
-
 class TestMergeFilesOptional:
     """merge_files 端到端: 木/金可选 + 配对错误处理。"""
 
@@ -735,7 +519,7 @@ class TestMergeFilesOptional:
         gold_wb.save(str(gold_p))
         with pytest.raises(ValueError) as excinfo:
             merge_files(main_path=main_p, wood_path=None, gold_path=gold_p,
-                        sku_prefix="T", mode="new")
+                        sku_prefix="T")
         msg = str(excinfo.value)
         assert "配对失败" in msg
         assert "未提供" in msg  # 木框未提供
@@ -752,7 +536,7 @@ class TestMergeFilesOptional:
         main_wb.save(str(main_p))
         wood_wb.save(str(wood_p))
         out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
-                          sku_prefix="T", mode="new")
+                          sku_prefix="T")
         ws = _lw(str(out))["Template"]
         # parent + 10 main + 5 wood = 16 行 (新格式 DATA_START_ROW=8, r8-r23)
         assert ws.cell(row=8, column=4).value == "Parent"
@@ -775,7 +559,7 @@ class TestMergeFilesOptional:
         gold_wb.save(str(gold_p))
         with pytest.raises(ValueError) as excinfo:
             merge_files(main_path=main_p, wood_path=None, gold_path=gold_p,
-                        sku_prefix="T", mode="new")
+                        sku_prefix="T")
         msg = str(excinfo.value)
         assert "Sunset Beach" in msg  # 原始 Product Name 应出现, 不是空
 
@@ -871,7 +655,7 @@ class TestSingleFileSkuRewrite:
         for g in groups:
             for r in g:
                 ws.cell(row=r, column=1).value = f"OLD-{r}"
-        rewrite_sku(ws, groups, "XL810Z", sku_col=1, mode="new")
+        rewrite_sku(ws, groups, "XL810Z", sku_col=1)
         # 第 1 组
         assert ws.cell(row=8, column=1).value == "XL810Z-1"      # parent
         assert ws.cell(row=9, column=1).value == "XL810ZP-1"     # 子体 1
@@ -898,7 +682,7 @@ class TestSingleFileSkuRewrite:
         # 子体
         for i, r in enumerate(groups[0][1:], 1):
             ws.cell(row=r, column=1).value = f"XL810ZP-{i}"
-        write_parent_sku_formulas(ws, groups, parent_sku_col=5, seller_sku_col=1, mode="new")
+        write_parent_sku_formulas(ws, groups, parent_sku_col=5, seller_sku_col=1)
         # parent 行 Parent SKU 为空
         assert ws.cell(row=8, column=5).value is None
         # 第 1 个子体 = =A8 (引用 parent 的 Seller SKU)
@@ -906,25 +690,6 @@ class TestSingleFileSkuRewrite:
         # 后续子体 = =E{prev} (引用上一行 Parent SKU, 链式)
         assert ws.cell(row=10, column=5).value == "=E9"
         assert ws.cell(row=18, column=5).value == "=E17"
-
-
-# ===== old_parent 模式无 wood/gold 报错 =====
-
-class TestOldParentNoVariantRaises:
-    """old_parent 模式 (与 old_variant 一致) 无 wood/gold 时应报错。"""
-
-    def test_old_parent_no_variant_raises(self, tmp_path):
-        from amazon_excel_processor.merger import merge_files
-        main_wb, _ = _create_main_workbook(["Art A"])
-        main_p = tmp_path / "main.xlsx"
-        main_wb.save(str(main_p))
-        with pytest.raises(ValueError, match="老品模式"):
-            merge_files(main_path=main_p, wood_path=None, gold_path=None,
-                        sku_prefix="T", mode="old_parent")
-
-
-# ===== square 合并模式 =====
-
 class TestSquareMergeMode:
     """合并模式支持正方形 (square) 画作。
 
@@ -951,15 +716,15 @@ class TestSquareMergeMode:
         wood_wb.save(str(wood_p))
 
         out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
-                          sku_prefix="T", mode="new")
+                          sku_prefix="T")
 
         # 重新加载验证 (16 行: parent + Frame×5 + Unframe×5 + Wood×5)
         wb = load_workbook(str(out))
         ws = wb["Template"]
-        # row 9 = Frame 第1个: Product Name 应含 12x12inch (square 尺寸)
-        assert "12x12inch" in str(ws.cell(row=9, column=7).value)
-        # row 10 = Frame 第2个: 16x16inch
-        assert "16x16inch" in str(ws.cell(row=10, column=7).value)
+        # row 9 = Frame 第1个: Product Name 应含 12"L x 12"W (square 尺寸)
+        assert '12"L x 12"W' in str(ws.cell(row=9, column=7).value)
+        # row 10 = Frame 第2个: 16"L x 16"W
+        assert '16"L x 16"W' in str(ws.cell(row=10, column=7).value)
         # Length 列 (col 124) = 正方形值 12, 16, 20, 24, 28
         assert ws.cell(row=9, column=124).value == 12
         assert ws.cell(row=10, column=124).value == 16
@@ -967,7 +732,7 @@ class TestSquareMergeMode:
         assert ws.cell(row=9, column=126).value == 12
         assert ws.cell(row=10, column=126).value == 16
         # Wood 行 (row 19-23) 也用正方形尺寸
-        assert "12x12inch" in str(ws.cell(row=19, column=7).value)
+        assert '12"L x 12"W' in str(ws.cell(row=19, column=7).value)
         assert ws.cell(row=19, column=124).value == 12
         assert ws.cell(row=19, column=126).value == 12
 
@@ -989,12 +754,12 @@ class TestSquareMergeMode:
         wood_wb.save(str(wood_p))
 
         out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
-                          sku_prefix="T", mode="new")
+                          sku_prefix="T")
 
         wb = load_workbook(str(out))
         ws = wb["Template"]
-        # row 9 = Frame 第1个: 3:2 尺寸 08x12inch
-        assert "08x12inch" in str(ws.cell(row=9, column=7).value)
+        # row 9 = Frame 第1个: 3:2 尺寸 12"L x 8"W
+        assert '12"L x 8"W' in str(ws.cell(row=9, column=7).value)
         # Length = 12 (3:2 的 _STYLE_LENGTH[0])
         assert ws.cell(row=9, column=124).value == 12
         # Width = 8 (3:2 的 _STYLE_WIDTH[0])
@@ -1022,16 +787,16 @@ class TestSquareMergeMode:
         wood_wb.save(str(wood_p))
 
         out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
-                          sku_prefix="T", mode="new")
+                          sku_prefix="T")
 
         wb = load_workbook(str(out))
         ws = wb["Template"]
         # 第1幅 (16行, row 8-23): square
-        assert "12x12inch" in str(ws.cell(row=9, column=7).value)
+        assert '12"L x 12"W' in str(ws.cell(row=9, column=7).value)
         assert ws.cell(row=9, column=124).value == 12  # square Length
         assert ws.cell(row=9, column=126).value == 12  # square Width
         # 第2幅 (16行, row 24-39): 3:2
-        assert "08x12inch" in str(ws.cell(row=25, column=7).value)
+        assert '12"L x 8"W' in str(ws.cell(row=25, column=7).value)
         assert ws.cell(row=25, column=124).value == 12  # 3:2 Length
         assert ws.cell(row=25, column=126).value == 8   # 3:2 Width
 
@@ -1303,7 +1068,7 @@ class TestMergeClearsDuplicateWeightUnit:
         wood_wb.save(str(wood_p))
 
         out = merge_files(main_path=main_p, wood_path=wood_p, gold_path=None,
-                          sku_prefix="T", mode="new")
+                          sku_prefix="T")
 
         ws = load_workbook(str(out))["Template"]
         # 全部 16 行: col150 (Value 旁) 空, col148 (Item Weight 右侧) = Grams

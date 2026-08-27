@@ -32,15 +32,15 @@ SIZE_MAP_SEQUENCE_21 = [
 
 SIZE_32_21 = [
     "",
-    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
-    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
-    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
-    "12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''",
+    '12"L x 8"W', '18"L x 12"W', '24"L x 16"W', '30"L x 20"W', '36"L x 24"W',
+    '12"L x 8"W', '18"L x 12"W', '24"L x 16"W', '30"L x 20"W', '36"L x 24"W',
+    '12"L x 8"W', '18"L x 12"W', '24"L x 16"W', '30"L x 20"W', '36"L x 24"W',
+    '12"L x 8"W', '18"L x 12"W', '24"L x 16"W', '30"L x 20"W', '36"L x 24"W',
 ]
 
-LENGTH_32_21 = [""] + [12, 18, 24, 30, 36] * 4  # parent + 4 styles × 5 sizes = 21 (英寸)
+LENGTH_32_21 = [1] + [12, 18, 24, 30, 36] * 4  # parent=1 + 4 styles × 5 sizes = 21 (英寸)
 
-WIDTH_32_21 = [""] + [8, 12, 16, 20, 24] * 4
+WIDTH_32_21 = [1] + [8, 12, 16, 20, 24] * 4
 
 # Weight: parent=空, Frame 和 Wood/Gold 均为 0.18-0.88, Unframe 为 0.02-0.25
 WEIGHT_SEQUENCE_21 = [
@@ -119,12 +119,24 @@ PRICE_COLUMNS = [
 
 # 所有 style 共享的 5 尺寸值 (新格式, 英寸)
 _STYLE_SIZE_MAP = ["X-Small", "Small", "Medium", "Large", "X-Large"]
-# 3:2 比例
-_STYLE_SIZE_32 = ["12L''x08W''", "18L''x12W''", "24L''x16W''", "30L''x20W''", "36L''x24W''"]
+# 3:2 比例 (Size 列填 "{L}"L x {W}"W" 格式)
+_STYLE_SIZE_32 = [
+    '12"L x 8"W',
+    '18"L x 12"W',
+    '24"L x 16"W',
+    '30"L x 20"W',
+    '36"L x 24"W',
+]
 _STYLE_LENGTH = [12, 18, 24, 30, 36]
 _STYLE_WIDTH = [8, 12, 16, 20, 24]
 # 正方形比例 (L == W)
-_STYLE_SIZE_SQUARE = ["12L''x12W''", "16L''x16W''", "20L''x20W''", "24L''x24W''", "28L''x28W''"]
+_STYLE_SIZE_SQUARE = [
+    '12"L x 12"W',
+    '16"L x 16"W',
+    '20"L x 20"W',
+    '24"L x 24"W',
+    '28"L x 28"W',
+]
 _STYLE_LENGTH_SQUARE = [12, 16, 20, 24, 28]
 _STYLE_WIDTH_SQUARE = [12, 16, 20, 24, 28]
 # edge 序列已废弃: Style 列保留原始值, 不再填充 (Length 列即 Longer Edge)
@@ -197,8 +209,8 @@ def _build_sequences(active_styles: list, ratio_type: str = "3:2") -> dict:
 
     返回 dict, 每个序列长度 = 1 + 5*len(active_styles):
       color / size_map / size_32 / length / width / weight / price / labels
-    parent 行: color="", size_map="", size_32="", length="", width="",
-              weight="", price="", labels=None
+    parent 行: color="", size_map="", size_32="", length=1, width=1,
+              weight=1, price="", labels=None
     """
     # 按比例选择尺寸序列
     if ratio_type == "square":
@@ -214,8 +226,8 @@ def _build_sequences(active_styles: list, ratio_type: str = "3:2") -> dict:
         "color": [""],
         "size_map": [""],
         "size_32": [""],
-        "length": [""],
-        "width": [""],
+        "length": [1],
+        "width": [1],
         "weight": [1],
         "price": [""],
         "labels": [None],

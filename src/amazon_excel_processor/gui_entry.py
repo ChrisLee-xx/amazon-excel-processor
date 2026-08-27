@@ -149,28 +149,11 @@ def _run_merge(main_path: Path, wood_path, gold_path, flog: logging.Logger):
     log(f"  金框文件:    {gold_disp}")
     log("")
 
-    # 第 1 步: 选择上架类型
-    log("请选择上架类型:")
-    log("  1) 新品上架      (所有 SKU 按新命名规则重新编号, 输出含普内容)")
-    log("  2) 老品补充变体  (普文件原 11 行保留, 仅金+木 SKU 按新规则编号)")
-    log("  3) 老品合并      (只保留父体, 普通内容替换为金+木, 父体 SKU 保留)")
-    list_type = _prompt_choice("  输入 [1/2/3]: ", ["1", "2", "3"])
-    if list_type == "1":
-        mode = "new"
-        mode_label = "新品上架"
-    elif list_type == "2":
-        mode = "old_variant"
-        mode_label = "老品补充变体"
-    else:
-        mode = "old_parent"
-        mode_label = "老品合并"
-    log(f"  → {mode_label}")
+    # 上架类型: 只保留"新品上架"
+    mode = "new"
+    mode_label = "新品上架"
+    log("  上架类型: 新品上架 (所有 SKU 按新命名规则重新编号, 输出含普内容)")
     log("")
-
-    # 老品模式必须有变体文件
-    if mode in ("old_variant", "old_parent") and not (wood_path or gold_path):
-        print("ERROR: 老品模式需要至少一个木框或金框文件")
-        pause_exit(1)
 
     # 第 2 步: 输入 SKU 前缀
     log("请输入 SKU 命名 (推荐格式: 店铺名+日期+主题, 如 HM725):")

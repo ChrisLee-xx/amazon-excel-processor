@@ -70,9 +70,9 @@ def main():
             prefix = build_sku_prefix(args.sku)
             sku_col = col_map.get("SKU", 1)
             parent_sku_col = col_map.get("Parent SKU", 5)
-            rewrite_sku(ws, groups, prefix, sku_col=sku_col, mode="new")
+            rewrite_sku(ws, groups, prefix, sku_col=sku_col)
             write_parent_sku_formulas(ws, groups, parent_sku_col=parent_sku_col,
-                                      seller_sku_col=sku_col, mode="new")
+                                      seller_sku_col=sku_col)
             log_print(f">> SKU 命名完成: 前缀={prefix} (父体={prefix}-N, 普通子体={prefix}P-N)")
 
         log_print("")
