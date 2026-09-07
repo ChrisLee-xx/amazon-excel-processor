@@ -288,8 +288,8 @@ def fill_group_merged(
 
     # 逐行序列字段
     _fill_seq(ws, rows, col_map, "Color", seqs["color"])
-    if ratio_type != "square":
-        _fill_seq(ws, rows, col_map, "Size", seqs["size_32"])
+    # Size 列: 3:2 和 square 都填充 (square 用正方形尺寸序列)
+    _fill_seq(ws, rows, col_map, "Size", seqs["size_32"])
     _fill_seq(ws, rows, col_map, "Size Map", seqs["size_map"])
     _fill_seq(ws, rows, col_map, "Item Length Longer Edge", seqs["length"])
     _fill_seq(ws, rows, col_map, "Item Width Shorter Edge", seqs["width"])

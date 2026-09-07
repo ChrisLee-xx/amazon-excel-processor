@@ -344,141 +344,16 @@ def _extract_base_name_raw(name: str) -> str:
     if not name:
         return ""
     s = str(name).strip()
-    # 剥离末尾的 style 标签 + 尺寸后缀 (如 "Vintage Ornate Gold Frame-style 08x12inch(20x30cm)")
+    # 剥离末尾的 style 标签 + 尺寸后缀
+    # 支持两种尺寸格式: "08x12inch(20x30cm)" (Item Name 后缀) 和 '12"L x 8"W' (旧版标题)
     # 匹配: 空格 + style 标签 + 空格 + 尺寸
     style_alt = "|".join(re.escape(l) for l in ITEM_STYLE_LABELS.values())
-    pattern = re.compile(rf"\s+(?:{style_alt})\s+[0-9]+x[0-9]+inch\([0-9]+x[0-9]+cm\)$")
+    pattern = re.compile(
+        rf"\s+(?:{style_alt})\s+"
+        rf"(?:[0-9]+x[0-9]+inch\([0-9]+x[0-9]+cm\)|[0-9]+\"L x [0-9]+\"W)$"
+    )
     s = pattern.sub("", s)
     return s.strip()
-
-
-def _normalize_variant_names(ws, all_rows, variant_rows, name_col, ratio_type="3:2",
-                             variant_styles=None):
-    """老品补充模式: 只对变体行 (variant_rows) 做 Product Name 规范化.
-
-    base_title 从 parent 行 (all_rows[0]) 提取, 但不修改 parent 行。
-    variant_styles 决定各行 label (如 ["wood"] 或 ["gold"] 或 ["wood","gold"])。
-    """
-    if variant_styles is None:
-        variant_styles = ["wood", "gold"]
-    sizes = SIZES_SQUARE if ratio_type == "square" else SIZES_32
-    parent_cell = ws.cell(row=all_rows[0], column=name_col)
-    parent_value = parent_cell.value
-    if parent_value is None:
-        return
-    # 基名保留原样 (不去连字符/标点), 只剥离已有 style/尺寸后缀
-    base_title = _extract_base_name_raw(str(parent_value))
-    base_title = _clean_item_name(base_title)
-
-    # 变体 labels (不含 parent 占位): 每个 style × 5 (用 Item Name 专用标签)
-    var_labels = []
-    for key in variant_styles:
-        var_labels.extend([ITEM_STYLE_LABELS[key]] * 5)
-
-    for i, row in enumerate(variant_rows):
-        cell = ws.cell(row=row, column=name_col)
-        value = cell.value
-        if value is None:
-            continue
-        label = var_labels[i]
-        size_idx = i % 5
-        size = sizes[size_idx]
-        name = f"{base_title} {label} {size}"
-        name = collapse_spaces(name)
-        cell.value = name
-
-
-def _fill_variant_fields(ws, variant_rows, col_map, ratio_type="3:2", variant_styles=None):
-    """老品补充模式: 只对变体行 (variant_rows) 填充字段.
-
-    variant_styles 决定 color/price/weight 等序列 (如 ["wood"] / ["gold"] / ["wood","gold"])。
-    序列从 index 0 应用到 variant_rows (variant_rows 不含 parent)。
-    """
-    if variant_styles is None:
-        variant_styles = ["wood", "gold"]
-    # 构建仅含变体 style 的逐行序列 (去掉 parent 占位 index 0)
-    full = _build_sequences(variant_styles, ratio_type)
-    vseq = {k: v[1:] for k, v in full.items()}
-
-    def _set(field_name, seq_key):
-        if field_name not in col_map:
-            return
-        col = col_map[field_name]
-        for i, row in enumerate(variant_rows):
-            ws.cell(row=row, column=col).value = vseq[seq_key][i]
-
-    _set("Color", "color")
-    if ratio_type != "square":
-        _set("Size", "size_32")
-    _set("Item Length Longer Edge", "length")
-    _set("Item Width Shorter Edge", "width")
-    _set("Item Weight", "weight")
-    # 新格式: 3 个价格列 (List Price / Your Price / B2B) 填同一价格序列
-    # 价格随 size 从小到大排列, 与 Size 列顺序一致
-    for price_col in PRICE_COLUMNS:
-        _set(price_col, "price")
-    # 注意: Style 列保留原始值, 不覆盖 (Color 列才填 style 标签)
-
-    # Shipping (Package) 字段填充
-    _set("Item Package Length", "package_length")
-    _set("Item Package Width", "package_width")
-    _set("Item Package Height", "package_height")
-    _set("Package Weight", "package_weight")
-
-    # Unit 列填充
-    if "Item Length Unit" in col_map:
-        for row in variant_rows:
-            ws.cell(row=row, column=col_map["Item Length Unit"]).value = "Inches"
-    if "Item Width Unit" in col_map:
-        for row in variant_rows:
-            ws.cell(row=row, column=col_map["Item Width Unit"]).value = "Inches"
-    if "Item Weight Unit" in col_map:
-        for row in variant_rows:
-            ws.cell(row=row, column=col_map["Item Weight Unit"]).value = "Grams"
-    if "Package Length Unit" in col_map:
-        for row in variant_rows:
-            ws.cell(row=row, column=col_map["Package Length Unit"]).value = "Centimeters"
-    if "Package Width Unit" in col_map:
-        for row in variant_rows:
-            ws.cell(row=row, column=col_map["Package Width Unit"]).value = "Centimeters"
-    if "Package Height Unit" in col_map:
-        for row in variant_rows:
-            ws.cell(row=row, column=col_map["Package Height Unit"]).value = "Centimeters"
-    if "Package Weight Unit" in col_map:
-        for row in variant_rows:
-            ws.cell(row=row, column=col_map["Package Weight Unit"]).value = "Kilograms"
-
-    # Variation Theme Name / Paint Type / Color Map
-    simple_fills = {"Variation Theme Name": "COLOR/SIZE", "Paint Type": "Oil", "Color Map": "Multi"}
-    for field, val in simple_fills.items():
-        if field in col_map:
-            col = col_map[field]
-            for row in variant_rows:
-                ws.cell(row=row, column=col).value = val
-
-    # Search Terms: 替换下划线
-    if "Search Terms" in col_map:
-        col = col_map["Search Terms"]
-        for row in variant_rows:
-            v = ws.cell(row=row, column=col).value
-            if v is not None and isinstance(v, str) and "_" in v:
-                ws.cell(row=row, column=col).value = v.replace("_", " ")
-
-
-def _fill_meta_columns_variant(ws, variant_rows, col_map):
-    """老品补充模式: 只对变体行设 Parentage Level / Variation Theme Name / Package Level."""
-    if "Variation Theme Name" in col_map:
-        col = col_map["Variation Theme Name"]
-        for r in variant_rows:
-            ws.cell(row=r, column=col).value = "COLOR/SIZE"
-    if "Package Level" in col_map:
-        col = col_map["Package Level"]
-        for r in variant_rows:
-            ws.cell(row=r, column=col).value = "unit"
-    if "Parentage Level" in col_map:
-        col = col_map["Parentage Level"]
-        for r in variant_rows:
-            ws.cell(row=r, column=col).value = "Child"
 
 
 def normalize_group_merged(ws, rows, name_col, ratio_type="3:2", active_styles=None):
@@ -552,7 +427,7 @@ def _clean_item_name(text: str) -> str:
 
 
 def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
-                has_wood=False, has_gold=False):
+                has_wood=False, has_gold=False, ratio_types=None):
     """重写 Seller SKU (新品上架模式).
 
     Args:
@@ -562,10 +437,17 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
         sku_col: Seller SKU 列
         has_wood: 是否有木框变体 (Wood 行用 M 后缀)
         has_gold: 是否有金框变体 (Gold 行用 J 后缀)
+        ratio_types: 与 groups 对齐的比例类型列表 ("3:2"/"square");
+                     None 或缺省元素按 "3:2" 处理
 
     SKU 后缀规则:
-        parent       → {prefix}-N      (父体)
-        Frame/Unframe→ {prefix}P-N     (普通子体, P=Plain)
+        3:2 比例:
+            parent       → {prefix}-N      (父体)
+            Frame/Unframe→ {prefix}P-N     (普通子体, P=Plain)
+        square 比例 (正方形画作):
+            parent       → {prefix}-N      (父体)
+            Frame        → {prefix}F-N     (Frame, 取消 P)
+            Unframe      → {prefix}U-N     (Unframe, 取消 P)
         Wood         → {prefix}M-N     (木框子体, M=木)
         Gold         → {prefix}J-N     (金框子体, J=Gold)
     各套编号各自独立连续 (跨 group 不重置)。
@@ -574,22 +456,34 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
     """
     parent_counter = 1
     normal_counter = 1
+    frame_counter = 1
+    unframe_counter = 1
     wood_counter = 1
     gold_counter = 1
-    for group in groups:
+    for g_idx, group in enumerate(groups):
+        ratio = ratio_types[g_idx] if ratio_types and g_idx < len(ratio_types) else "3:2"
         # parent → {prefix}-{N}
         ws.cell(row=group[0], column=sku_col).value = f"{prefix}-{parent_counter}"
         parent_counter += 1
-        # group[1:11] = Frame×5 + Unframe×5 (普通子体) → {prefix}P-{N}
-        for i in range(1, min(11, len(group))):
-            ws.cell(row=group[i], column=sku_col).value = f"{prefix}P-{normal_counter}"
-            normal_counter += 1
-        # Wood 行: group[11:16] (若 has_wood) → {prefix}M-{N}
+        if ratio == "square":
+            # 正方形: Frame×5 → {prefix}F-N, Unframe×5 → {prefix}U-N (各自独立编号)
+            for i in range(1, min(6, len(group))):
+                ws.cell(row=group[i], column=sku_col).value = f"{prefix}F-{frame_counter}"
+                frame_counter += 1
+            for i in range(6, min(11, len(group))):
+                ws.cell(row=group[i], column=sku_col).value = f"{prefix}U-{unframe_counter}"
+                unframe_counter += 1
+        else:
+            # 3:2: group[1:11] = Frame×5 + Unframe×5 (普通子体) → {prefix}P-N
+            for i in range(1, min(11, len(group))):
+                ws.cell(row=group[i], column=sku_col).value = f"{prefix}P-{normal_counter}"
+                normal_counter += 1
+        # Wood 行: group[11:16] (若 has_wood) → {prefix}M-N
         if has_wood:
             for i in range(11, min(16, len(group))):
                 ws.cell(row=group[i], column=sku_col).value = f"{prefix}M-{wood_counter}"
                 wood_counter += 1
-        # Gold 行: group[16:21] (若 has_wood) 或 group[11:16] (若 !has_wood) → {prefix}J-{N}
+        # Gold 行: group[16:21] (若 has_wood) 或 group[11:16] (若 !has_wood) → {prefix}J-N
         if has_gold:
             gold_start = 16 if has_wood else 11
             for i in range(gold_start, min(gold_start + 5, len(group))):
@@ -725,6 +619,7 @@ def merge_files(
             main_ws.cell(row=r, column=c).value = None
 
     new_groups = []
+    new_ratio_types = []  # 与 new_groups 对齐的比例类型 (决定 SKU 后缀 P / F+U)
     out_row = DATA_START_ROW
     for main_g in main_groups:
         name = main_base_names[id(main_g)]
@@ -760,6 +655,7 @@ def merge_files(
             name_col=name_col,
         )
         new_groups.append(merged)
+        new_ratio_types.append(ratio_type)
         out_row += group_size
 
     # 配不上的报错 (用模糊匹配给候选)
@@ -768,7 +664,8 @@ def merge_files(
                              has_wood, has_gold, name_col)
 
     rewrite_sku(main_ws, new_groups, prefix, sku_col=sku_col,
-                has_wood=has_wood, has_gold=has_gold)
+                has_wood=has_wood, has_gold=has_gold,
+                ratio_types=new_ratio_types)
     write_parent_sku_formulas(main_ws, new_groups, parent_sku_col=parent_sku_col,
                               seller_sku_col=sku_col)
 

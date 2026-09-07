@@ -721,10 +721,10 @@ class TestSquareMergeMode:
         # 重新加载验证 (16 行: parent + Frame×5 + Unframe×5 + Wood×5)
         wb = load_workbook(str(out))
         ws = wb["Template"]
-        # row 9 = Frame 第1个: Product Name 应含 12"L x 12"W (square 尺寸)
-        assert '12"L x 12"W' in str(ws.cell(row=9, column=7).value)
-        # row 10 = Frame 第2个: 16"L x 16"W
-        assert '16"L x 16"W' in str(ws.cell(row=10, column=7).value)
+        # row 9 = Frame 第1个: Product Name 应含 12x12inch(30x30cm) (square 标题后缀)
+        assert "12x12inch(30x30cm)" in str(ws.cell(row=9, column=7).value)
+        # row 10 = Frame 第2个: 16x16inch(40x40cm)
+        assert "16x16inch(40x40cm)" in str(ws.cell(row=10, column=7).value)
         # Length 列 (col 124) = 正方形值 12, 16, 20, 24, 28
         assert ws.cell(row=9, column=124).value == 12
         assert ws.cell(row=10, column=124).value == 16
@@ -732,9 +732,18 @@ class TestSquareMergeMode:
         assert ws.cell(row=9, column=126).value == 12
         assert ws.cell(row=10, column=126).value == 16
         # Wood 行 (row 19-23) 也用正方形尺寸
-        assert '12"L x 12"W' in str(ws.cell(row=19, column=7).value)
+        assert "12x12inch(30x30cm)" in str(ws.cell(row=19, column=7).value)
         assert ws.cell(row=19, column=124).value == 12
         assert ws.cell(row=19, column=126).value == 12
+        # Size 列 (col 56) 正方形也填充: 12"L x 12"W
+        assert ws.cell(row=9, column=56).value == '12"L x 12"W'
+        assert ws.cell(row=10, column=56).value == '16"L x 16"W'
+        # SKU: 正方形 Frame=F, Unframe=U (各自独立编号)
+        assert ws.cell(row=8, column=1).value == "T-1"        # parent
+        assert ws.cell(row=9, column=1).value == "TF-1"       # Frame 1
+        assert ws.cell(row=13, column=1).value == "TF-5"      # Frame 5
+        assert ws.cell(row=14, column=1).value == "TU-1"      # Unframe 1
+        assert ws.cell(row=18, column=1).value == "TU-5"      # Unframe 5
 
     def test_32_merge_uses_32_sizes(self, tmp_path):
         """3:2 画作合并 (回归): Product Name 和 Length/Width 用 3:2 尺寸。"""
@@ -758,8 +767,8 @@ class TestSquareMergeMode:
 
         wb = load_workbook(str(out))
         ws = wb["Template"]
-        # row 9 = Frame 第1个: 3:2 尺寸 12"L x 8"W
-        assert '12"L x 8"W' in str(ws.cell(row=9, column=7).value)
+        # row 9 = Frame 第1个: 3:2 标题后缀 08x12inch(20x30cm)
+        assert "08x12inch(20x30cm)" in str(ws.cell(row=9, column=7).value)
         # Length = 12 (3:2 的 _STYLE_LENGTH[0])
         assert ws.cell(row=9, column=124).value == 12
         # Width = 8 (3:2 的 _STYLE_WIDTH[0])
@@ -792,11 +801,11 @@ class TestSquareMergeMode:
         wb = load_workbook(str(out))
         ws = wb["Template"]
         # 第1幅 (16行, row 8-23): square
-        assert '12"L x 12"W' in str(ws.cell(row=9, column=7).value)
+        assert "12x12inch(30x30cm)" in str(ws.cell(row=9, column=7).value)
         assert ws.cell(row=9, column=124).value == 12  # square Length
         assert ws.cell(row=9, column=126).value == 12  # square Width
         # 第2幅 (16行, row 24-39): 3:2
-        assert '12"L x 8"W' in str(ws.cell(row=25, column=7).value)
+        assert "08x12inch(20x30cm)" in str(ws.cell(row=25, column=7).value)
         assert ws.cell(row=25, column=124).value == 12  # 3:2 Length
         assert ws.cell(row=25, column=126).value == 8   # 3:2 Width
 

@@ -11,20 +11,21 @@ logger = logging.getLogger(__name__)
 FRAME_SPLIT_PATTERN = re.compile(r"\s+(Frame|Unframe)-", re.IGNORECASE)
 NUMERIC_SUFFIX_PATTERN = re.compile(r"-(\d+)(?=\s|$)")
 
-# 固定尺寸顺序（与 md 文档一致）—— {L}"L x {W}"W 格式
+# Item Name 标题后缀的固定尺寸顺序 —— {W}x{L}inch({Wcm}x{Lcm}cm) 格式
+# (Size 列的 {L}"L x {W}"W 格式在 field_filler._STYLE_SIZE_* 中定义)
 SIZES_32 = [
-    '12"L x 8"W',
-    '18"L x 12"W',
-    '24"L x 16"W',
-    '30"L x 20"W',
-    '36"L x 24"W',
+    "08x12inch(20x30cm)",
+    "12x18inch(30x45cm)",
+    "16x24inch(40x60cm)",
+    "20x30inch(50x75cm)",
+    "24x36inch(60x90cm)",
 ]
 SIZES_SQUARE = [
-    '12"L x 12"W',
-    '16"L x 16"W',
-    '20"L x 20"W',
-    '24"L x 24"W',
-    '28"L x 28"W',
+    "12x12inch(30x30cm)",
+    "16x16inch(40x40cm)",
+    "20x20inch(50x50cm)",
+    "24x24inch(60x60cm)",
+    "28x28inch(70x70cm)",
 ]
 
 # 固定的 11 行结构：[parent, Frame×5, Unframe×5]

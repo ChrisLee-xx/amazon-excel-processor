@@ -96,8 +96,10 @@ def _run_single(input_path: Path, flog: logging.Logger, sku_prefix: str = ""):
     total_rows = len(groups) * 11
     log(f">> 共 {len(groups)} 个产品组, {total_rows} 行数据\n")
 
+    ratio_types = []
     for idx, rows in enumerate(groups, 1):
         ratio_type = detect_ratio_type(ws, rows, col_map)
+        ratio_types.append(ratio_type)
         log(f"  [{idx}/{len(groups)}] 行{rows[0]}-{rows[-1]} 比例: {ratio_type}")
         normalize_group(ws, rows, product_name_col, ratio_type)
         fill_group(ws, rows, col_map, ratio_type)
@@ -109,10 +111,12 @@ def _run_single(input_path: Path, flog: logging.Logger, sku_prefix: str = ""):
         sku_col = col_map.get("SKU", 1)
         parent_sku_col = col_map.get("Parent SKU", 5)
         rewrite_sku(ws, groups, prefix, sku_col=sku_col,
-                    has_wood=False, has_gold=False)
+                    has_wood=False, has_gold=False, ratio_types=ratio_types)
         write_parent_sku_formulas(ws, groups, parent_sku_col=parent_sku_col,
                                   seller_sku_col=sku_col)
-        log(f">> SKU 命名完成: 前缀={prefix} (父体={prefix}-N, 普通子体={prefix}P-N)")
+        log(f">> SKU 命名完成: 前缀={prefix} "
+            f"(父体={prefix}-N, 3:2子体={prefix}P-N, "
+            f"正方形Frame={prefix}F-N, 正方形Unframe={prefix}U-N)")
 
     log("\n>> 保存文件...")
     output_path = save_workbook(ws, input_path, template_name)
