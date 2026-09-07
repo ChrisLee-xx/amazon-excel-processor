@@ -456,17 +456,12 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
         has_wood: 是否有木框变体 (Wood 行用 M 后缀)
         has_gold: 是否有金框变体 (Gold 行用 J 后缀)
         has_black_wood: 是否有黑木框变体 (Black Wood 行用 B 后缀)
-        ratio_types: 与 groups 对齐的比例类型列表 ("3:2"/"square");
-                     None 或缺省元素按 "3:2" 处理
+        ratio_types: 已废弃 (3:2 和 square 均用 F/U 后缀), 仅为兼容保留
 
-    SKU 后缀规则:
-        3:2 比例:
-            parent       → {prefix}-N      (父体)
-            Frame/Unframe→ {prefix}P-N     (普通子体, P=Plain)
-        square 比例 (正方形画作):
-            parent       → {prefix}-N      (父体)
-            Frame        → {prefix}F-N     (Frame, 取消 P)
-            Unframe      → {prefix}U-N     (Unframe, 取消 P)
+    SKU 后缀规则 (3:2 和 square 相同):
+        parent       → {prefix}-N      (父体)
+        Frame        → {prefix}F-N     (Frame, 无 P)
+        Unframe      → {prefix}U-N     (Unframe, 无 P)
         Wood         → {prefix}M-N     (木框子体, M=木)
         Gold         → {prefix}J-N     (金框子体, J=Gold)
         Black Wood   → {prefix}B-N     (黑木框子体, B=Black Wood)
@@ -475,30 +470,22 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
     group 行布局: [parent, Frame×5, Unframe×5, Wood×5(若有), Gold×5(若有), BlackWood×5(若有)]
     """
     parent_counter = 1
-    normal_counter = 1
     frame_counter = 1
     unframe_counter = 1
     wood_counter = 1
     gold_counter = 1
     black_wood_counter = 1
-    for g_idx, group in enumerate(groups):
-        ratio = ratio_types[g_idx] if ratio_types and g_idx < len(ratio_types) else "3:2"
+    for group in groups:
         # parent → {prefix}-{N}
         ws.cell(row=group[0], column=sku_col).value = f"{prefix}-{parent_counter}"
         parent_counter += 1
-        if ratio == "square":
-            # 正方形: Frame×5 → {prefix}F-N, Unframe×5 → {prefix}U-N (各自独立编号)
-            for i in range(1, min(6, len(group))):
-                ws.cell(row=group[i], column=sku_col).value = f"{prefix}F-{frame_counter}"
-                frame_counter += 1
-            for i in range(6, min(11, len(group))):
-                ws.cell(row=group[i], column=sku_col).value = f"{prefix}U-{unframe_counter}"
-                unframe_counter += 1
-        else:
-            # 3:2: group[1:11] = Frame×5 + Unframe×5 (普通子体) → {prefix}P-N
-            for i in range(1, min(11, len(group))):
-                ws.cell(row=group[i], column=sku_col).value = f"{prefix}P-{normal_counter}"
-                normal_counter += 1
+        # Frame×5 → {prefix}F-N, Unframe×5 → {prefix}U-N (各自独立编号)
+        for i in range(1, min(6, len(group))):
+            ws.cell(row=group[i], column=sku_col).value = f"{prefix}F-{frame_counter}"
+            frame_counter += 1
+        for i in range(6, min(11, len(group))):
+            ws.cell(row=group[i], column=sku_col).value = f"{prefix}U-{unframe_counter}"
+            unframe_counter += 1
         # Wood 行: group[11:16] (若 has_wood) → {prefix}M-N
         if has_wood:
             for i in range(11, min(16, len(group))):

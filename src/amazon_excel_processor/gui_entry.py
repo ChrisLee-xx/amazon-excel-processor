@@ -115,8 +115,7 @@ def _run_single(input_path: Path, flog: logging.Logger, sku_prefix: str = ""):
         write_parent_sku_formulas(ws, groups, parent_sku_col=parent_sku_col,
                                   seller_sku_col=sku_col)
         log(f">> SKU 命名完成: 前缀={prefix} "
-            f"(父体={prefix}-N, 3:2子体={prefix}P-N, "
-            f"正方形Frame={prefix}F-N, 正方形Unframe={prefix}U-N)")
+            f"(父体={prefix}-N, Frame={prefix}F-N, Unframe={prefix}U-N)")
 
     log("\n>> 保存文件...")
     output_path = save_workbook(ws, input_path, template_name)

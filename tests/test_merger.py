@@ -333,16 +333,19 @@ class TestMergeOnePainting:
 
 class TestRewriteSku:
     def test_continuous_numbering_new_mode(self):
-        """新品上架: 父体={prefix}-N, 普通子体={prefix}P-N, 木框={prefix}W-N, 金框={prefix}J-N, 四套独立编号"""
+        """新品上架: 父体={prefix}-N, Frame={prefix}F-N, Unframe={prefix}U-N, 木框={prefix}M-N, 金框={prefix}J-N, 各套独立编号"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 25)), list(range(25, 46))]
         rewrite_sku(ws, groups, prefix="HM725", has_wood=True, has_gold=True)
         # group 1: parent = HM725-1
         assert ws.cell(row=4, column=1).value == "HM725-1"
-        # group 1: 普通子体 (r5-r14) = HM725P-1 到 HM725P-10
-        assert ws.cell(row=5, column=1).value == "HM725P-1"
-        assert ws.cell(row=14, column=1).value == "HM725P-10"
+        # group 1: Frame (r5-r9) = HM725F-1 到 HM725F-5
+        assert ws.cell(row=5, column=1).value == "HM725F-1"
+        assert ws.cell(row=9, column=1).value == "HM725F-5"
+        # group 1: Unframe (r10-r14) = HM725U-1 到 HM725U-5
+        assert ws.cell(row=10, column=1).value == "HM725U-1"
+        assert ws.cell(row=14, column=1).value == "HM725U-5"
         # group 1: 木框子体 (r15-r19) = HM725M-1 到 HM725M-5
         assert ws.cell(row=15, column=1).value == "HM725M-1"
         assert ws.cell(row=19, column=1).value == "HM725M-5"
@@ -351,9 +354,11 @@ class TestRewriteSku:
         assert ws.cell(row=24, column=1).value == "HM725J-5"
         # group 2: parent = HM725-2
         assert ws.cell(row=25, column=1).value == "HM725-2"
-        # group 2: 普通子体 = HM725P-11 到 HM725P-20
-        assert ws.cell(row=26, column=1).value == "HM725P-11"
-        assert ws.cell(row=35, column=1).value == "HM725P-20"
+        # group 2: Frame = HM725F-6 到 HM725F-10, Unframe = HM725U-6 到 HM725U-10
+        assert ws.cell(row=26, column=1).value == "HM725F-6"
+        assert ws.cell(row=30, column=1).value == "HM725F-10"
+        assert ws.cell(row=31, column=1).value == "HM725U-6"
+        assert ws.cell(row=35, column=1).value == "HM725U-10"
         # group 2: 木框子体 = HM725M-6 到 HM725M-10
         assert ws.cell(row=36, column=1).value == "HM725M-6"
         assert ws.cell(row=40, column=1).value == "HM725M-10"
@@ -368,9 +373,12 @@ class TestRewriteSku:
         rewrite_sku(ws, groups, prefix="AB", has_wood=True, has_gold=True)
         # parent
         assert ws.cell(row=4, column=1).value == "AB-1"
-        # 普通子体
-        assert ws.cell(row=5, column=1).value == "ABP-1"
-        assert ws.cell(row=14, column=1).value == "ABP-10"
+        # Frame (r5-r9)
+        assert ws.cell(row=5, column=1).value == "ABF-1"
+        assert ws.cell(row=9, column=1).value == "ABF-5"
+        # Unframe (r10-r14)
+        assert ws.cell(row=10, column=1).value == "ABU-1"
+        assert ws.cell(row=14, column=1).value == "ABU-5"
         # 木框子体 (r15-r19)
         assert ws.cell(row=15, column=1).value == "ABM-1"
         assert ws.cell(row=19, column=1).value == "ABM-5"
@@ -385,20 +393,20 @@ class TestRewriteSku:
         groups = [list(range(4, 20))]  # 16 行: parent + 10 普通 + 5 木
         rewrite_sku(ws, groups, prefix="T", has_wood=True, has_gold=False)
         assert ws.cell(row=4, column=1).value == "T-1"
-        assert ws.cell(row=5, column=1).value == "TP-1"
-        assert ws.cell(row=14, column=1).value == "TP-10"
+        assert ws.cell(row=5, column=1).value == "TF-1"
+        assert ws.cell(row=14, column=1).value == "TU-5"
         assert ws.cell(row=15, column=1).value == "TM-1"
         assert ws.cell(row=19, column=1).value == "TM-5"
 
     def test_gold_only_uses_J_suffix(self):
-        """只有金框 (无木框) → 金框用 J 后缀, 无 W 行"""
+        """只有金框 (无木框) → 金框用 J 后缀, 无 M 行"""
         wb = Workbook()
         ws = wb.active
         groups = [list(range(4, 20))]  # 16 行: parent + 10 普通 + 5 金
         rewrite_sku(ws, groups, prefix="T", has_wood=False, has_gold=True)
         assert ws.cell(row=4, column=1).value == "T-1"
-        assert ws.cell(row=5, column=1).value == "TP-1"
-        assert ws.cell(row=14, column=1).value == "TP-10"
+        assert ws.cell(row=5, column=1).value == "TF-1"
+        assert ws.cell(row=14, column=1).value == "TU-5"
         assert ws.cell(row=15, column=1).value == "TJ-1"
         assert ws.cell(row=19, column=1).value == "TJ-5"
 class TestWriteParentSkuFormulas:
@@ -743,10 +751,10 @@ class TestStyleColumnPreserved:
 # ===== 单文件模式 SKU 重写 (无木金 J 后缀) =====
 
 class TestSingleFileSkuRewrite:
-    """单文件 (11 行/组) SKU 命名: 父体 prefix-N, 普通子体 prefixP-N。"""
+    """单文件 (11 行/组) SKU 命名: 父体 prefix-N, Frame=prefixF-N, Unframe=prefixU-N。"""
 
     def test_single_file_sku_naming(self):
-        """单文件 mode=new: parent=prefix-1, 子体=prefixP-1..prefixP-10。"""
+        """单文件 mode=new: parent=prefix-1, Frame=prefixF-1..5, Unframe=prefixU-1..5。"""
         from amazon_excel_processor.merger import rewrite_sku, write_parent_sku_formulas
         wb = Workbook()
         ws = wb.active
@@ -760,12 +768,14 @@ class TestSingleFileSkuRewrite:
         rewrite_sku(ws, groups, "XL810Z", sku_col=1)
         # 第 1 组
         assert ws.cell(row=8, column=1).value == "XL810Z-1"      # parent
-        assert ws.cell(row=9, column=1).value == "XL810ZP-1"     # 子体 1
-        assert ws.cell(row=18, column=1).value == "XL810ZP-10"   # 子体 10
+        assert ws.cell(row=9, column=1).value == "XL810ZF-1"     # Frame 1
+        assert ws.cell(row=13, column=1).value == "XL810ZF-5"    # Frame 5
+        assert ws.cell(row=14, column=1).value == "XL810ZU-1"    # Unframe 1
+        assert ws.cell(row=18, column=1).value == "XL810ZU-5"    # Unframe 5
         # 第 2 组
         assert ws.cell(row=19, column=1).value == "XL810Z-2"     # parent
-        assert ws.cell(row=20, column=1).value == "XL810ZP-11"   # 子体 11
-        assert ws.cell(row=29, column=1).value == "XL810ZP-20"   # 子体 20
+        assert ws.cell(row=20, column=1).value == "XL810ZF-6"    # Frame 6
+        assert ws.cell(row=29, column=1).value == "XL810ZU-10"   # Unframe 10
         # 无 J 后缀 (单文件没有木金)
         for g in groups:
             for r in g[1:]:
