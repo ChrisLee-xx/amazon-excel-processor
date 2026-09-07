@@ -182,21 +182,32 @@ STYLE_SPECS = {
         "package_height": [4.5, 4.5, 4.5, 4.5, 4.5],
         "package_weight": [0.18, 0.28, 0.48, 0.68, 0.88],
     },
+    "black_wood": {
+        "label": "Black Wood Frame-style",
+        "weight": [450, 850, 1500, 2400, 3400],
+        "price": [26.9, 39.9, 59.9, 99.9, 129.9],
+        "package_length": [32, 47, 62, 77, 92],
+        "package_width": [22, 32, 42, 52, 62],
+        "package_height": [4.5, 4.5, 4.5, 4.5, 4.5],
+        "package_weight": [0.18, 0.28, 0.48, 0.68, 0.88],
+    },
 }
 
 # 永远来自普文件的 style (固定前 10 个 child)
 MAIN_STYLES = ["frame", "unframe"]
 # 可选变体 style (按输出顺序追加)
-VARIANT_STYLES = ["wood", "gold"]
+VARIANT_STYLES = ["wood", "gold", "black_wood"]
 
 
-def build_active_styles(has_wood: bool, has_gold: bool) -> list:
-    """返回合并输出的 style 顺序 (frame, unframe 总在, wood/gold 按需)."""
+def build_active_styles(has_wood: bool, has_gold: bool, has_black_wood: bool = False) -> list:
+    """返回合并输出的 style 顺序 (frame, unframe 总在, wood/gold/black_wood 按需)."""
     styles = list(MAIN_STYLES)
     if has_wood:
         styles.append("wood")
     if has_gold:
         styles.append("gold")
+    if has_black_wood:
+        styles.append("black_wood")
     return styles
 
 

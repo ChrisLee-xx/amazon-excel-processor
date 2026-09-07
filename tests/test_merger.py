@@ -505,6 +505,108 @@ class TestOptionalVariants:
         )
         assert len(merged) == 11
         assert merged[-1] == 14
+
+
+class TestBlackWoodVariants:
+    """黑木框可选: 仅黑木 16 行; 木+金+黑木 26 行。"""
+
+    def _create_black_wood_ws(self, painting="Art A"):
+        return _create_variant_workbook([painting], role="black_wood").active
+
+    def test_black_wood_only_16_rows(self):
+        """只提供黑木框 → 16 行, 黑木 color 在 index 11-15。"""
+        s = _setup_merge_one_painting()
+        bw_ws = self._create_black_wood_ws()
+        bw_groups = group_rows(bw_ws, group_size=VARIANT_GROUP_SIZE)
+        merged = merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            output_start_row=4,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            black_wood_group=bw_groups[0],
+            black_wood_ws=bw_ws,
+            max_col=s["max_col"],
+        )
+        assert len(merged) == 16
+        ws = s["main_ws"]
+        colors = [ws.cell(row=r, column=55).value for r in merged]
+        for i in range(11, 16):
+            assert colors[i] == "Black Wood Frame-style"
+        # 3 个价格列与木/金一致
+        for c in [154, 182, 191]:
+            prices = [ws.cell(row=r, column=c).value for r in merged]
+            assert prices[11:16] == [26.9, 39.9, 59.9, 99.9, 129.9]
+        # Item Name 标题后缀
+        name = str(ws.cell(row=merged[11], column=7).value)
+        assert "Black Wood Frame-style 08x12inch(20x30cm)" in name
+
+    def test_all_four_26_rows_and_sku_suffixes(self):
+        """木+金+黑木都在 → 26 行; SKU 后缀 M/J/B 各自独立编号。"""
+        s = _setup_merge_one_painting()
+        bw_ws = self._create_black_wood_ws()
+        bw_groups = group_rows(bw_ws, group_size=VARIANT_GROUP_SIZE)
+        merged = merge_one_painting(
+            main_snapshots=s["main_snapshots"],
+            output_start_row=4,
+            output_ws=s["main_ws"],
+            col_map=s["main_col_map"],
+            wood_group=s["wood_group"],
+            wood_ws=s["wood_ws"],
+            gold_group=s["gold_group"],
+            gold_ws=s["gold_ws"],
+            black_wood_group=bw_groups[0],
+            black_wood_ws=bw_ws,
+            max_col=s["max_col"],
+        )
+        assert len(merged) == 26
+        ws = s["main_ws"]
+        colors = [ws.cell(row=r, column=55).value for r in merged]
+        assert colors[11] == "Vintage Wood Grain Frame-style"
+        assert colors[16] == "Vintage Ornate Gold Frame-style"
+        assert colors[21] == "Black Wood Frame-style"
+        # SKU 后缀: wood=M, gold=J, black_wood=B
+        rewrite_sku(ws, [merged], "XL81Z", sku_col=1,
+                    has_wood=True, has_gold=True, has_black_wood=True)
+        assert ws.cell(row=merged[0], column=1).value == "XL81Z-1"
+        assert ws.cell(row=merged[11], column=1).value == "XL81ZM-1"
+        assert ws.cell(row=merged[16], column=1).value == "XL81ZJ-1"
+        assert ws.cell(row=merged[21], column=1).value == "XL81ZB-1"
+        assert ws.cell(row=merged[25], column=1).value == "XL81ZB-5"
+        # 黑木行数据来自 black_wood 文件
+        assert ws.cell(row=merged[21], column=1).value == "XL81ZB-1"  # 已被 rewrite 覆盖
+        # 重量/包装与木金一致
+        assert ws.cell(row=merged[21], column=147).value == 450
+
+    def test_merge_files_with_black_wood_e2e(self, tmp_path):
+        """merge_files 端到端: 主+木+金+黑木 → 26 行/组, SKU 后缀 B。"""
+        from amazon_excel_processor.merger import merge_files
+        main_wb, _ = _create_main_workbook(["Art A"])
+        wood_wb = _create_variant_workbook(["Art A"], role="wood")
+        gold_wb = _create_variant_workbook(["Art A"], role="gold")
+        bw_wb = _create_variant_workbook(["Art A"], role="black_wood")
+        main_p = tmp_path / "main.xlsx"
+        main_wb.save(str(main_p))
+        wood_wb.save(str(tmp_path / "wood.xlsx"))
+        gold_wb.save(str(tmp_path / "gold.xlsx"))
+        bw_wb.save(str(tmp_path / "bw.xlsx"))
+        out = merge_files(
+            main_path=main_p,
+            wood_path=tmp_path / "wood.xlsx",
+            gold_path=tmp_path / "gold.xlsx",
+            black_wood_path=tmp_path / "bw.xlsx",
+            sku_prefix="XL81Z",
+        )
+        wb = load_workbook(str(out))
+        ws = wb.active
+        # 26 行: row 8-33 (DATA_START_ROW=8)
+        group = list(range(8, 34))
+        assert ws.cell(row=group[21], column=55).value == "Black Wood Frame-style"
+        assert ws.cell(row=group[21], column=1).value == "XL81ZB-1"
+        assert ws.cell(row=group[25], column=1).value == "XL81ZB-5"
+        name = str(ws.cell(row=group[21], column=7).value)
+        assert "Black Wood Frame-style 08x12inch(20x30cm)" in name
+
+
 class TestMergeFilesOptional:
     """merge_files 端到端: 木/金可选 + 配对错误处理。"""
 

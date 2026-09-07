@@ -1,17 +1,19 @@
 """三文件合并模块
 
-输入文件 (木/金可选):
+输入文件 (木/金/黑木可选):
   - main_path: 普文件 (11 行/组, 含 Frame+Unframe 2 个 style), 必填
   - wood_path: 木框文件 (6 行/组, 每画 1 个 group, 对应 Vintage Wood Grain Frame-style), 可选
   - gold_path: 金框文件 (6 行/组, 每画 1 个 group, 对应 Vintage Ornate Gold Frame-style), 可选
+  - black_wood_path: 黑木框文件 (6 行/组, 每画 1 个 group, 对应 Black Wood Frame-style), 可选
 
-合并输出每组行数 = 1 + 5×(2 + 有木 + 有金): 11 / 16 / 21, 顺序固定:
+合并输出每组行数 = 1 + 5×(2 + 有木 + 有金 + 有黑木): 11 / 16 / 21 / 26, 顺序固定:
   1. Frame-style (5 尺寸, 来自 main)
   2. Unframe-style (5 尺寸, 来自 main)
   3. Vintage Wood Grain Frame-style (5 尺寸, 来自 wood, 若提供)
   4. Vintage Ornate Gold Frame-style (5 尺寸, 来自 gold, 若提供)
+  5. Black Wood Frame-style (5 尺寸, 来自 black_wood, 若提供)
 
-用户在 GUI 中按 [主, 木, 金] 顺序指定文件 (木/金可留空跳过), 不再依赖"第 1 次/第 2 次"假设.
+用户在 GUI 中按 [主, 木, 金, 黑木] 顺序指定文件 (木/金/黑木可留空跳过), 不再依赖"第 1 次/第 2 次"假设.
 """
 
 import logging
@@ -47,20 +49,21 @@ from .name_normalizer import (
 
 logger = logging.getLogger(__name__)
 
-MERGED_GROUP_SIZE = 21  # 最大: parent + 4 style × 5 size (wood+gold 都在)
-VARIANT_GROUP_SIZE = 6   # 木/金文件每画 1 个 group, 6 行
+MERGED_GROUP_SIZE = 26  # 最大: parent + 5 style × 5 size (wood+gold+black_wood 都在)
+VARIANT_GROUP_SIZE = 6   # 木/金/黑木文件每画 1 个 group, 6 行
 MAIN_GROUP_SIZE = 11     # 普文件每画 1 个 group, 11 行
 
 
-def merged_group_size(has_wood: bool, has_gold: bool) -> int:
-    """合并输出每组行数 = 1 (parent) + 5 × (2 + 有木 + 有金)。
+def merged_group_size(has_wood: bool, has_gold: bool, has_black_wood: bool = False) -> int:
+    """合并输出每组行数 = 1 (parent) + 5 × (2 + 有木 + 有金 + 有黑木)。
 
-    木/金皆无 → 11; 只有其一 → 16; 都在 → 21。
+    木/金/黑木皆无 → 11; 有其一 → 16; 有其二 → 21; 都在 → 26。
     """
-    return 1 + 5 * (2 + bool(has_wood) + bool(has_gold))
+    return 1 + 5 * (2 + bool(has_wood) + bool(has_gold) + bool(has_black_wood))
 
 WOOD_STYLE = "Vintage Wood Grain Frame-style"
 GOLD_STYLE = "Vintage Ornate Gold Frame-style"
+BLACK_WOOD_STYLE = "Black Wood Frame-style"
 
 # Item Name 的 style 标签 (与 Color 列 STYLE_SPECS.label 保持一致)
 ITEM_STYLE_LABELS = {
@@ -68,6 +71,7 @@ ITEM_STYLE_LABELS = {
     "unframe": "Unframe-style",
     "wood": "Vintage Wood Grain Frame-style",
     "gold": "Vintage Ornate Gold Frame-style",
+    "black_wood": "Black Wood Frame-style",
 }
 
 # 新格式列号 (新格式 header row 4, data row 8)
@@ -238,11 +242,13 @@ def merge_one_painting(
     gold_group=None,
     wood_ws=None,
     gold_ws=None,
+    black_wood_group=None,
+    black_wood_ws=None,
     max_col=None,
     ratio_type="3:2",
     name_col=None,
 ):
-    """合并 1 画到动态行数结构 (木/金可选).
+    """合并 1 画到动态行数结构 (木/金/黑木可选).
 
     只支持"新品上架"模式: 全部行 normalize + fill + meta。
 
@@ -255,11 +261,13 @@ def merge_one_painting(
         col_map: 目标 ws 的列映射
         wood_ws: 木框文件 worksheet (用于读 wood_group 数据)
         gold_ws: 金框文件 worksheet (用于读 gold_group 数据)
+        black_wood_group: 黑木框文件的 6 行 group (来源 black_wood_ws); None 表示无黑木框
+        black_wood_ws: 黑木框文件 worksheet (用于读 black_wood_group 数据)
         max_col: 列数
         ratio_type: "3:2" 或 "square"
         name_col: Item Name 列号 (动态从 col_map 读取; None 用硬编码常量)
 
-    输出行数 = 1 + 5×(2 + 有木 + 有金): 11 / 16 / 21。
+    输出行数 = 1 + 5×(2 + 有木 + 有金 + 有黑木): 11 / 16 / 21 / 26。
     普文件恒为前 11 行 (parent + Frame×5 + Unframe×5), 变体行紧随其后。
     """
     if name_col is None:
@@ -267,15 +275,18 @@ def merge_one_painting(
     assert len(main_snapshots) == MAIN_GROUP_SIZE
     has_wood = wood_group is not None
     has_gold = gold_group is not None
+    has_black_wood = black_wood_group is not None
     if has_wood:
         assert wood_ws is not None and len(wood_group) == VARIANT_GROUP_SIZE
     if has_gold:
         assert gold_ws is not None and len(gold_group) == VARIANT_GROUP_SIZE
+    if has_black_wood:
+        assert black_wood_ws is not None and len(black_wood_group) == VARIANT_GROUP_SIZE
 
     if max_col is None:
         max_col = output_ws.max_column
 
-    active_styles = build_active_styles(has_wood, has_gold)
+    active_styles = build_active_styles(has_wood, has_gold, has_black_wood)
 
     merged_rows = []
 
@@ -301,6 +312,13 @@ def merge_one_painting(
     if has_gold:
         gold_snapshots = [_snapshot_row(gold_ws, r, max_col) for r in gold_group]
         for i, snap in enumerate(gold_snapshots[1:]):
+            dst = output_start_row + next_offset + i
+            _write_row(output_ws, dst, snap, max_col)
+            merged_rows.append(dst)
+        next_offset += 5
+    if has_black_wood:
+        black_snapshots = [_snapshot_row(black_wood_ws, r, max_col) for r in black_wood_group]
+        for i, snap in enumerate(black_snapshots[1:]):
             dst = output_start_row + next_offset + i
             _write_row(output_ws, dst, snap, max_col)
             merged_rows.append(dst)
@@ -427,16 +445,17 @@ def _clean_item_name(text: str) -> str:
 
 
 def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
-                has_wood=False, has_gold=False, ratio_types=None):
+                has_wood=False, has_gold=False, has_black_wood=False, ratio_types=None):
     """重写 Seller SKU (新品上架模式).
 
     Args:
         ws: 目标 worksheet
-        groups: 多个 group (行号列表, 长度 11/16/21 取决于木/金组合)
+        groups: 多个 group (行号列表, 长度 11/16/21/26 取决于木/金/黑木组合)
         prefix: SKU 前缀 (如 HM725)
         sku_col: Seller SKU 列
         has_wood: 是否有木框变体 (Wood 行用 M 后缀)
         has_gold: 是否有金框变体 (Gold 行用 J 后缀)
+        has_black_wood: 是否有黑木框变体 (Black Wood 行用 B 后缀)
         ratio_types: 与 groups 对齐的比例类型列表 ("3:2"/"square");
                      None 或缺省元素按 "3:2" 处理
 
@@ -450,9 +469,10 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
             Unframe      → {prefix}U-N     (Unframe, 取消 P)
         Wood         → {prefix}M-N     (木框子体, M=木)
         Gold         → {prefix}J-N     (金框子体, J=Gold)
+        Black Wood   → {prefix}B-N     (黑木框子体, B=Black Wood)
     各套编号各自独立连续 (跨 group 不重置)。
 
-    group 行布局: [parent, Frame×5, Unframe×5, Wood×5(若有), Gold×5(若有)]
+    group 行布局: [parent, Frame×5, Unframe×5, Wood×5(若有), Gold×5(若有), BlackWood×5(若有)]
     """
     parent_counter = 1
     normal_counter = 1
@@ -460,6 +480,7 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
     unframe_counter = 1
     wood_counter = 1
     gold_counter = 1
+    black_wood_counter = 1
     for g_idx, group in enumerate(groups):
         ratio = ratio_types[g_idx] if ratio_types and g_idx < len(ratio_types) else "3:2"
         # parent → {prefix}-{N}
@@ -489,6 +510,12 @@ def rewrite_sku(ws, groups, prefix, sku_col=COL_SELLER_SKU,
             for i in range(gold_start, min(gold_start + 5, len(group))):
                 ws.cell(row=group[i], column=sku_col).value = f"{prefix}J-{gold_counter}"
                 gold_counter += 1
+        # Black Wood 行: 紧跟 wood/gold 之后 → {prefix}B-N
+        if has_black_wood:
+            bw_start = 11 + 5 * (bool(has_wood) + bool(has_gold))
+            for i in range(bw_start, min(bw_start + 5, len(group))):
+                ws.cell(row=group[i], column=sku_col).value = f"{prefix}B-{black_wood_counter}"
+                black_wood_counter += 1
 
 
 def write_parent_sku_formulas(ws, groups, parent_sku_col=COL_PARENT_SKU, seller_sku_col=COL_SELLER_SKU):
@@ -515,19 +542,21 @@ def merge_files(
     main_path,
     wood_path=None,
     gold_path=None,
+    black_wood_path=None,
     sku_prefix="",
     output_path=None,
 ):
-    """合并主入口 (木/金可选, 只支持新品上架模式).
+    """合并主入口 (木/金/黑木可选, 只支持新品上架模式).
 
     Args:
         main_path: 普文件 (11 行/组, Frame+Unframe), 必填
         wood_path: 木框文件 (6 行/组, 每画 1 个 group), 可选; None 表示无木框
         gold_path: 金框文件 (6 行/组, 每画 1 个 group), 可选; None 表示无金框
+        black_wood_path: 黑木框文件 (6 行/组, 每画 1 个 group), 可选; None 表示无黑木框
         sku_prefix: SKU 前缀 (如 HM725, 推荐格式 店铺名+日期+主题)
         output_path: 输出路径 (默认: {main_stem}_processed.xlsm)
 
-    输出每组行数 = 1 + 5×(2 + 有木 + 有金): 11 / 16 / 21。
+    输出每组行数 = 1 + 5×(2 + 有木 + 有金 + 有黑木): 11 / 16 / 21 / 26。
 
     Returns:
         实际输出文件路径
@@ -535,26 +564,32 @@ def merge_files(
     main_path = Path(main_path)
     wood_path = Path(wood_path) if wood_path is not None else None
     gold_path = Path(gold_path) if gold_path is not None else None
+    black_wood_path = Path(black_wood_path) if black_wood_path is not None else None
     has_wood = wood_path is not None
     has_gold = gold_path is not None
+    has_black_wood = black_wood_path is not None
 
     prefix = build_sku_prefix(sku_prefix)
-    logger.info("合并开始: main=%s, wood=%s, gold=%s, prefix=%s",
+    logger.info("合并开始: main=%s, wood=%s, gold=%s, black_wood=%s, prefix=%s",
                 main_path.name,
                 wood_path.name if has_wood else "无",
                 gold_path.name if has_gold else "无",
+                black_wood_path.name if has_black_wood else "无",
                 prefix)
 
     main_wb, main_ws, main_sheet = load_workbook(main_path)
-    wood_ws = gold_ws = None
+    wood_ws = gold_ws = black_wood_ws = None
     if has_wood:
         _, wood_ws, _ = load_workbook(wood_path)
     if has_gold:
         _, gold_ws, _ = load_workbook(gold_path)
+    if has_black_wood:
+        _, black_wood_ws, _ = load_workbook(black_wood_path)
 
     main_groups = group_rows(main_ws, group_size=MAIN_GROUP_SIZE)
     wood_groups = group_rows(wood_ws, group_size=VARIANT_GROUP_SIZE) if has_wood else []
     gold_groups = group_rows(gold_ws, group_size=VARIANT_GROUP_SIZE) if has_gold else []
+    black_wood_groups = group_rows(black_wood_ws, group_size=VARIANT_GROUP_SIZE) if has_black_wood else []
 
     main_role, _ = identify_file_role(main_groups)
     if main_role != "main":
@@ -573,6 +608,13 @@ def merge_files(
             raise ValueError(
                 f"金框文件类型错误: {gold_path.name} 是 {gold_role}, 期望 variant (6 行/组)"
             )
+    if has_black_wood:
+        black_wood_role, _ = identify_file_role(black_wood_groups)
+        if black_wood_role != "variant":
+            raise ValueError(
+                f"黑木框文件类型错误: {black_wood_path.name} 是 {black_wood_role}, "
+                f"期望 variant (6 行/组)"
+            )
 
     col_map = locate_columns(main_ws)
 
@@ -586,6 +628,7 @@ def merge_files(
     main_by_name = index_groups_by_name(main_ws, main_groups, name_col, file_label="普文件")
     wood_by_name = index_groups_by_name(wood_ws, wood_groups, name_col, file_label="木框文件") if has_wood else {}
     gold_by_name = index_groups_by_name(gold_ws, gold_groups, name_col, file_label="金框文件") if has_gold else {}
+    black_wood_by_name = index_groups_by_name(black_wood_ws, black_wood_groups, name_col, file_label="黑木框文件") if has_black_wood else {}
 
     # 关键: 在合并前一次性快照所有 main 行 + 提前算 base name
     snap_cols = [main_ws.max_column]
@@ -593,6 +636,8 @@ def merge_files(
         snap_cols.append(wood_ws.max_column)
     if has_gold:
         snap_cols.append(gold_ws.max_column)
+    if has_black_wood:
+        snap_cols.append(black_wood_ws.max_column)
     max_col_for_snapshot = max(snap_cols)
     main_all_snapshots = {
         r: _snapshot_row(main_ws, r, max_col_for_snapshot)
@@ -605,7 +650,7 @@ def merge_files(
     # 合并模式支持 3:2 和 square, 由 main 文件 Size 列预填值决定
     main_ratio_types = {id(g): detect_ratio_type(main_ws, g, col_map) for g in main_groups}
 
-    group_size = merged_group_size(has_wood, has_gold)
+    group_size = merged_group_size(has_wood, has_gold, has_black_wood)
 
     # 追踪每个 base name 已配对次数 (支持同名多 group 按顺序配对)
     # 普/木/金文件的产品顺序一致, 同名产品按出现顺序配对
@@ -628,28 +673,35 @@ def merge_files(
 
         wood_list = wood_by_name.get(name, []) if has_wood else None
         gold_list = gold_by_name.get(name, []) if has_gold else None
+        black_wood_list = black_wood_by_name.get(name, []) if has_black_wood else None
         # 文件整体缺失不报错; 只有"文件存在但缺该画"才进 skipped
-        if (has_wood and idx >= len(wood_list)) or (has_gold and idx >= len(gold_list)):
+        if ((has_wood and idx >= len(wood_list))
+                or (has_gold and idx >= len(gold_list))
+                or (has_black_wood and idx >= len(black_wood_list))):
             # 注意: main_ws 数据区已被清空, 必须从快照读原始 Product Name
             main_raw_val = main_all_snapshots.get(main_g[0], {}).get(name_col)
             main_raw = str(main_raw_val) if main_raw_val else ""
             skipped.append((name, main_raw, idx,
                             len(wood_list) if has_wood else None,
-                            len(gold_list) if has_gold else None))
+                            len(gold_list) if has_gold else None,
+                            len(black_wood_list) if has_black_wood else None))
             continue
         wood_g = wood_list[idx] if has_wood else None
         gold_g = gold_list[idx] if has_gold else None
+        black_wood_g = black_wood_list[idx] if has_black_wood else None
         main_snapshots = [main_all_snapshots[r] for r in main_g]
         ratio_type = main_ratio_types.get(id(main_g), "3:2")
         merged = merge_one_painting(
             main_snapshots=main_snapshots,
             wood_group=wood_g,
             gold_group=gold_g,
+            black_wood_group=black_wood_g,
             output_start_row=out_row,
             output_ws=main_ws,
             col_map=col_map,
             wood_ws=wood_ws,
             gold_ws=gold_ws,
+            black_wood_ws=black_wood_ws,
             max_col=max_col_for_snapshot,
             ratio_type=ratio_type,
             name_col=name_col,
@@ -661,10 +713,14 @@ def merge_files(
     # 配不上的报错 (用模糊匹配给候选)
     if skipped:
         _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
-                             has_wood, has_gold, name_col)
+                             has_wood, has_gold, name_col,
+                             black_wood_by_name=black_wood_by_name,
+                             black_wood_ws=black_wood_ws,
+                             has_black_wood=has_black_wood)
 
     rewrite_sku(main_ws, new_groups, prefix, sku_col=sku_col,
                 has_wood=has_wood, has_gold=has_gold,
+                has_black_wood=has_black_wood,
                 ratio_types=new_ratio_types)
     write_parent_sku_formulas(main_ws, new_groups, parent_sku_col=parent_sku_col,
                               seller_sku_col=sku_col)
@@ -686,22 +742,25 @@ def _get_raw_name(ws, group, name_col):
 
 
 def _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
-                         has_wood=True, has_gold=True, name_col=None):
+                         has_wood=True, has_gold=True, name_col=None,
+                         black_wood_by_name=None, black_wood_ws=None,
+                         has_black_wood=False):
     """配不上时用模糊匹配找候选, 报错列出。
 
-    木/金文件整体缺失 (has_wood/has_gold=False) 时, 对应文件报"未提供"且不列候选。
+    木/金/黑木文件整体缺失 (has_*=False) 时, 对应文件报"未提供"且不列候选。
     只有"文件存在但缺该画"才会到达这里 (文件整体缺失在主循环不会进 skipped)。
     """
     if name_col is None:
         name_col = COL_PRODUCT_NAME
     errors = []
-    for name, main_raw, idx, wood_count, gold_count in skipped:
+    for name, main_raw, idx, wood_count, gold_count, black_wood_count in skipped:
         msg = f"  普文件产品找不到配对:\n"
         msg += f"    Product Name: {main_raw}\n"
         msg += f"    (归一化后: '{name}', 第 {idx+1} 次出现)\n"
         wood_disp = f"{wood_count} 个" if has_wood else "未提供"
         gold_disp = f"{gold_count} 个" if has_gold else "未提供"
-        msg += f"    木框文件中该名 {wood_disp}, 金框文件中该名 {gold_disp}\n"
+        black_wood_disp = f"{black_wood_count} 个" if has_black_wood else "未提供"
+        msg += f"    木框文件中该名 {wood_disp}, 金框文件中该名 {gold_disp}, 黑木框文件中该名 {black_wood_disp}\n"
         # 模糊匹配给候选 (仅对实际提供的文件)
         if has_wood:
             all_wood_keys = list(wood_by_name.keys())
@@ -719,10 +778,18 @@ def _raise_pairing_error(skipped, wood_by_name, gold_by_name, wood_ws, gold_ws,
                 for cname, ratio in gold_candidates[:3]:
                     gold_raw = _get_raw_name(gold_ws, gold_by_name[cname][0], name_col)
                     msg += f"      [{ratio:.0%}] {gold_raw}\n"
+        if has_black_wood and black_wood_by_name is not None:
+            all_bw_keys = list(black_wood_by_name.keys())
+            bw_candidates = _find_close_matches(name, all_bw_keys)
+            if bw_candidates:
+                msg += f"    最接近的黑木框候选:\n"
+                for cname, ratio in bw_candidates[:3]:
+                    bw_raw = _get_raw_name(black_wood_ws, black_wood_by_name[cname][0], name_col)
+                    msg += f"      [{ratio:.0%}] {bw_raw}\n"
         errors.append(msg)
 
     raise ValueError(
-        f"产品配对失败, {len(skipped)} 个普文件产品在木/金文件中找不到匹配:\n\n"
+        f"产品配对失败, {len(skipped)} 个普文件产品在木/金/黑木文件中找不到匹配:\n\n"
         + "\n".join(errors)
         + "\n请检查 Product Name 是否一致 (允许标点/扩展名/括号差异), "
         "或手动修改后重试"
