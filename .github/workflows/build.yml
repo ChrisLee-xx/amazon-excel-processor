@@ -10,14 +10,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-14          # Apple Silicon (M 系列)
             artifact: amazon-excel-processor-mac
             binary: dist/amazon-excel-processor
-            extra: dist/run-amazon-excel-processor.command
           - os: windows-latest
             artifact: amazon-excel-processor-win
             binary: dist/amazon-excel-processor.exe
-            extra: ""
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -42,9 +40,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            ${{ matrix.binary }}
-            ${{ matrix.extra }}
+          path: ${{ matrix.binary }}
 
   release:
     needs: build
@@ -65,11 +61,30 @@ jobs:
           name: amazon-excel-processor-win
           path: win
 
+      - name: Package Mac binary as zip
+        # zip 保留可执行权限，浏览器直接下载二进制会丢失执行位导致双击变成"文本文档"
+        run: |
+          chmod +x mac/amazon-excel-processor
+          cd mac && zip amazon-excel-processor-mac.zip amazon-excel-processor
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            mac/amazon-excel-processor
-            mac/run-amazon-excel-processor.command
+            mac/amazon-excel-processor-mac.zip
             win/amazon-excel-processor.exe
           generate_release_notes: true
+          body: |
+            ## 使用方法
+
+            ### Mac (Apple Silicon)
+            1. 下载 `amazon-excel-processor-mac.zip` 并解压（注意：不是 Source code）
+            2. 解压后文件已带执行权限，**双击 `amazon-excel-processor` 即可在终端运行**
+            3. 首次运行如被拦截（无法验证开发者）：**右键点击文件 → 打开**；
+               或在终端执行 `xattr -d com.apple.quarantine amazon-excel-processor`
+            4. 也可以把 `.xlsx`/`.xlsm` 文件直接拖到程序图标上（单文件模式）
+            5. 双击运行后按提示选择模式（1=单文件, 2=合并）
+
+            ### Windows
+            1. 下载 `amazon-excel-processor.exe`
+            2. 双击运行后按提示选择模式，或把 `.xlsx`/`.xlsm` 拖到 .exe 图标上

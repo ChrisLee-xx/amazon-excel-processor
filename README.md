@@ -31,13 +31,13 @@
 ## 直接使用（无需安装开发环境）
 
 ### Mac
-1. 从 Release 下载 `amazon-excel-processor` 和 `run-amazon-excel-processor.command`，放在**同一目录**
-2. 使用方式：
-   - **双击 `run-amazon-excel-processor.command`**：会自动在终端中启动程序（不要直接双击 `amazon-excel-processor`，那是无扩展名的二进制，会被 TextEdit 当作文本打开并报编码错误）
-   - **拖拽**：把 `.xlsx`/`.xlsm` 文件拖到 `.command` 文件上（单文件模式）
+1. 从 Release 下载 `amazon-excel-processor-mac.zip` 并解压（注意：不是 Source code，直接下载裸二进制会丢失执行权限）
+2. 解压后文件已带执行权限，使用方式：
+   - **双击** `amazon-excel-processor`：自动打开终端运行，按提示选择模式
+   - **拖拽**：把 `.xlsx`/`.xlsm` 文件拖到图标上（单文件模式）
 
-> 首次打开可能提示"无法验证开发者"，右键 `.command` 选"打开"即可。
-> 如果提示"已损坏"，在终端执行：`xattr -d com.apple.quarantine /路径/run-amazon-excel-processor.command /路径/amazon-excel-processor`
+> 首次打开可能提示"无法验证开发者"，**右键 → 打开**即可。
+> 如果提示"已损坏"，在终端执行：`xattr -d com.apple.quarantine /解压路径/amazon-excel-processor`
 
 ### Windows
 1. 从 `dist/` 目录拿到 `amazon-excel-processor.exe` 文件
