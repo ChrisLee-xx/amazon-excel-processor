@@ -13,9 +13,11 @@ jobs:
           - os: macos-latest
             artifact: amazon-excel-processor-mac
             binary: dist/amazon-excel-processor
+            extra: dist/run-amazon-excel-processor.command
           - os: windows-latest
             artifact: amazon-excel-processor-win
             binary: dist/amazon-excel-processor.exe
+            extra: ""
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -40,7 +42,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.binary }}
+          path: |
+            ${{ matrix.binary }}
+            ${{ matrix.extra }}
 
   release:
     needs: build
@@ -66,5 +70,6 @@ jobs:
         with:
           files: |
             mac/amazon-excel-processor
+            mac/run-amazon-excel-processor.command
             win/amazon-excel-processor.exe
           generate_release_notes: true
